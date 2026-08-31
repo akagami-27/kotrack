@@ -1,5 +1,12 @@
+import {
+  lazy,
+  Suspense,
+} from 'react'
 import { Link } from 'react-router-dom'
-import HeroScene from '../components/HeroScene'
+
+const HeroScene = lazy(
+  () => import('../components/HeroScene'),
+)
 
 export default function Landing() {
   return (
@@ -93,7 +100,9 @@ export default function Landing() {
         {/* 3D area */}
         <div className="relative hidden h-[650px] lg:block">
           <div className="absolute inset-0">
-            <HeroScene />
+            <Suspense fallback={null}>
+              <HeroScene />
+            </Suspense>
           </div>
 
           {/* Balance card */}
