@@ -3,10 +3,46 @@
   <head>
     <meta charset="UTF-8" />
 
+    <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Mobile / iOS -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
 
+    <meta name="theme-color" content="#090806" />
+
+    <!-- iPhone Home Screen / Standalone App -->
+    <meta
+      name="apple-mobile-web-app-capable"
+      content="yes"
+    />
+
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+
+    <meta
+      name="apple-mobile-web-app-title"
+      content="KoTrack"
+    />
+
+    <!-- iOS Home Screen Icon -->
+    <link
+      rel="apple-touch-icon"
+      href="/pwa-192.png"
+    />
+
+    <!-- Web App Manifest -->
+    <link
+      rel="manifest"
+      href="/manifest.webmanifest"
+    />
+
+    <!-- Page Title -->
     <title>KoTrack-TETEK</title>
 
     <!-- Website Description -->
@@ -16,27 +52,57 @@
     />
 
     <!-- Open Graph / WhatsApp / Facebook / Discord -->
-    <meta property="og:title" content="KoTrack-TETEK" />
+    <meta
+      property="og:title"
+      content="KoTrack-TETEK"
+    />
+
     <meta
       property="og:description"
       content="Track shared drink expenses, sessions, balances and payments with KoTrack."
     />
-    <meta property="og:url" content="https://kotrack.smolelab.com" />
-    <meta property="og:type" content="website" />
+
+    <meta
+      property="og:url"
+      content="https://kotrack.smolelab.com"
+    />
+
+    <meta
+      property="og:type"
+      content="website"
+    />
+
     <meta
       property="og:image"
       content="https://kotrack.smolelab.com/og-image.png"
     />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
+
+    <meta
+      property="og:image:width"
+      content="1200"
+    />
+
+    <meta
+      property="og:image:height"
+      content="630"
+    />
 
     <!-- Twitter / X -->
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="KoTrack-TETEK" />
+    <meta
+      name="twitter:card"
+      content="summary_large_image"
+    />
+
+    <meta
+      name="twitter:title"
+      content="KoTrack-TETEK"
+    />
+
     <meta
       name="twitter:description"
       content="Track shared drink expenses, sessions, balances and payments with KoTrack."
     />
+
     <meta
       name="twitter:image"
       content="https://kotrack.smolelab.com/og-image.png"
@@ -45,6 +111,10 @@
 
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+
+    <script
+      type="module"
+      src="/src/main.tsx"
+    ></script>
   </body>
 </html>

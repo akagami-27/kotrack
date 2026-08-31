@@ -45,9 +45,6 @@ app.include_router(payments_router)
 app.include_router(session_requests_router)
 app.include_router(admin_router)
 
-# Admin-only analytics and administration endpoints
-app.include_router(admin_router)
-
 
 # ---------------------------------------------------------------------------
 # Health Check

@@ -1,10 +1,9 @@
 const API_URL =
   import.meta.env.VITE_API_URL ??
-  ''
+  'http://localhost:8000'
 
 const TOKEN_KEY =
   'kotrack_access_token'
-
 
 export async function apiRequest<T>(
   path: string,
@@ -16,10 +15,23 @@ export async function apiRequest<T>(
   const headers =
     new Headers(options.headers)
 
-  // Only set JSON content type when a body exists
-  // and the caller hasn't already provided one.
+  /*
+   * IMPORTANT:
+   * FormData must NOT receive a manually assigned
+   * application/json Content-Type.
+   *
+   * The browser automatically creates:
+   *
+   * multipart/form-data; boundary=...
+   *
+   * when body is FormData.
+   */
+  const isFormData =
+    options.body instanceof FormData
+
   if (
     options.body &&
+    !isFormData &&
     !headers.has('Content-Type')
   ) {
     headers.set(
@@ -51,10 +63,6 @@ export async function apiRequest<T>(
     )
   }
 
-  // --------------------------------------------------------------------------
-  // Handle expired/invalid authentication
-  // --------------------------------------------------------------------------
-
   if (response.status === 401) {
     localStorage.removeItem(TOKEN_KEY)
 
@@ -63,12 +71,10 @@ export async function apiRequest<T>(
     )
   }
 
-  // --------------------------------------------------------------------------
-  // Parse response safely
-  // --------------------------------------------------------------------------
-
   const contentType =
-    response.headers.get('content-type') || ''
+    response.headers.get(
+      'content-type',
+    ) || ''
 
   let data: unknown = null
 
@@ -85,10 +91,6 @@ export async function apiRequest<T>(
       .text()
       .catch(() => null)
   }
-
-  // --------------------------------------------------------------------------
-  // Handle API errors
-  // --------------------------------------------------------------------------
 
   if (!response.ok) {
     let message =
@@ -131,10 +133,6 @@ export async function apiRequest<T>(
 
     throw new Error(message)
   }
-
-  // --------------------------------------------------------------------------
-  // Empty responses
-  // --------------------------------------------------------------------------
 
   if (
     response.status === 204 ||

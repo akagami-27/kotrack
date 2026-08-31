@@ -13,6 +13,7 @@ from app.models.session_participant import SessionParticipant
 from app.models.payment import Payment
 from app.models.session_request import SessionRequest
 from app.models.session_request_participant import SessionRequestParticipant
+from app.models.password_reset import PasswordResetRequest
 
 
 __all__ = [
@@ -20,6 +21,7 @@ __all__ = [
     "UserRole",
     "PaymentStatus",
     "User",
+    "PasswordResetRequest",
     "DrinkSession",
     "SessionParticipant",
     "Payment",

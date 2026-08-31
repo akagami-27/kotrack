@@ -10,10 +10,10 @@ class PaymentCreate(BaseModel):
     """
     Input schema for a user submitting a payment.
 
-    `status` is deliberately absent -- every new payment always starts as
-    PENDING; only an admin confirmation flow (not yet implemented) may move
-    it to CONFIRMED or REJECTED.
+    Receipt files are uploaded separately using multipart/form-data.
+    The payment status is never controlled by the user.
     """
+
     amount: Decimal = Field(gt=0)
 
 
@@ -24,9 +24,18 @@ class PaymentRead(BaseModel):
     user_id: int
     amount: Decimal
     status: PaymentStatus
+
     created_at: datetime
+
     confirmed_at: datetime | None
     confirmed_by: int | None
+
+    # Receipt information
+    receipt_filename: str | None
+    receipt_content_type: str | None
+    receipt_file_size: int | None
+    receipt_sha256: str | None
+    receipt_uploaded_at: datetime | None
 
 
 class UserBalanceRead(BaseModel):

@@ -61,3 +61,11 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+class PasswordResetRequestCreate(BaseModel):
+    name: str
+
+class PasswordResetConfirm(BaseModel):
+    name: str
+    code: str
+    new_password: str

@@ -1,21 +1,138 @@
 """
-Service for creating drink sessions.
+Business logic for drink sessions.
 
-This is the only place a DrinkSession + its SessionParticipant rows should
-be constructed. It guarantees total_cost and amount_owed are always
-computed by the backend and never taken from client input.
+This module is responsible for:
+
+- Creating sessions
+- Updating sessions
+- Deleting sessions
+- Validating session ownership
+- Enforcing the 3-day user modification rule
+- Recalculating total_cost
+- Recalculating participant amount_owed
+
+Financial values are NEVER trusted from client input.
 """
 
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-from app.models.drink_session import DEFAULT_PRICE_PER_PACKET, DrinkSession
+from app.models.drink_session import (
+    DEFAULT_PRICE_PER_PACKET,
+    DrinkSession,
+)
+from app.models.enums import UserRole
 from app.models.session_participant import SessionParticipant
 from app.models.user import User
-from app.services.financial import calculate_session_total, split_session_cost
+from app.services.financial import (
+    calculate_session_total,
+    split_session_cost,
+)
+
+
+USER_SESSION_EDIT_DAYS = 3
+
+
+# ============================================================================
+# HELPERS
+# ============================================================================
+
+
+def _validate_participants(
+    db: DbSession,
+    participant_user_ids: list[int],
+) -> dict[int, User]:
+    """
+    Validate all participant users and return them indexed by ID.
+    """
+
+    if not participant_user_ids:
+        raise ValueError(
+            "A session must have at least one participant"
+        )
+
+    if len(set(participant_user_ids)) != len(
+        participant_user_ids
+    ):
+        raise ValueError(
+            "Duplicate user_id in participant list"
+        )
+
+    users = db.execute(
+        select(User).where(
+            User.id.in_(participant_user_ids)
+        )
+    ).scalars().all()
+
+    users_by_id = {
+        user.id: user
+        for user in users
+    }
+
+    missing_user_ids = [
+        user_id
+        for user_id in participant_user_ids
+        if user_id not in users_by_id
+    ]
+
+    if missing_user_ids:
+        raise ValueError(
+            f"Participant users do not exist: {missing_user_ids}"
+        )
+
+    inactive_user_ids = [
+        user_id
+        for user_id in participant_user_ids
+        if not users_by_id[user_id].is_active
+    ]
+
+    if inactive_user_ids:
+        raise ValueError(
+            f"Participant users are inactive: {inactive_user_ids}"
+        )
+
+    return users_by_id
+
+
+def _can_modify_session(
+    *,
+    session: DrinkSession,
+    current_user: User,
+) -> bool:
+    """
+    Determine whether the current user can modify a session.
+
+    ADMIN:
+        Can modify any session at any time.
+
+    USER:
+        Can modify only sessions they created,
+        and only within 3 days of the session date.
+    """
+
+    # Admins can always modify sessions.
+    if current_user.role == UserRole.ADMIN:
+        return True
+
+    # Normal users can only modify sessions they created.
+    if session.created_by != current_user.id:
+        return False
+
+    today = datetime.now(timezone.utc).date()
+
+    age_in_days = (
+        today - session.session_date
+    ).days
+
+    return age_in_days <= USER_SESSION_EDIT_DAYS
+
+
+# ============================================================================
+# CREATE
+# ============================================================================
 
 
 def create_drink_session(
@@ -29,59 +146,47 @@ def create_drink_session(
     commit: bool = True,
 ) -> DrinkSession:
     """
-    Create a drink session and its participant cost splits.
-
-    All participant IDs and the creator are validated before creating
-    financial records.
-
-    `total_cost` and each participant's `amount_owed` are always computed
-    server-side.
+    Create a drink session and calculate all financial values server-side.
     """
 
     if not participant_user_ids:
-        raise ValueError("A session must have at least one participant")
+        raise ValueError(
+            "A session must have at least one participant"
+        )
 
-    if len(set(participant_user_ids)) != len(participant_user_ids):
-        raise ValueError("Duplicate user_id in participant list")
+    if len(set(participant_user_ids)) != len(
+        participant_user_ids
+    ):
+        raise ValueError(
+            "Duplicate user_id in participant list"
+        )
 
-    # Verify the creator exists and is active.
+    if packets_used <= 0:
+        raise ValueError(
+            "Packets used must be greater than zero"
+        )
+
+    if price_per_packet <= 0:
+        raise ValueError(
+            "Price per packet must be greater than zero"
+        )
+
     creator = db.get(User, created_by)
 
     if creator is None:
-        raise ValueError("Session creator does not exist")
+        raise ValueError(
+            "Session creator does not exist"
+        )
 
     if not creator.is_active:
-        raise ValueError("Session creator is inactive")
-
-    # Load all requested participants in one query.
-    stmt = select(User).where(User.id.in_(participant_user_ids))
-    users = db.execute(stmt).scalars().all()
-
-    users_by_id = {user.id: user for user in users}
-
-    # Detect nonexistent users.
-    missing_user_ids = [
-        user_id
-        for user_id in participant_user_ids
-        if user_id not in users_by_id
-    ]
-
-    if missing_user_ids:
         raise ValueError(
-            f"Participant users do not exist: {missing_user_ids}"
+            "Session creator is inactive"
         )
 
-    # Inactive users cannot participate in new sessions.
-    inactive_user_ids = [
-        user_id
-        for user_id in participant_user_ids
-        if not users_by_id[user_id].is_active
-    ]
-
-    if inactive_user_ids:
-        raise ValueError(
-            f"Participant users are inactive: {inactive_user_ids}"
-        )
+    _validate_participants(
+        db,
+        participant_user_ids,
+    )
 
     total_cost = calculate_session_total(
         packets_used,
@@ -118,3 +223,145 @@ def create_drink_session(
         db.flush()
 
     return drink_session
+
+
+# ============================================================================
+# UPDATE
+# ============================================================================
+
+
+def update_drink_session(
+    db: DbSession,
+    *,
+    drink_session: DrinkSession,
+    current_user: User,
+    session_date: date | None = None,
+    packets_used: Decimal | None = None,
+    participant_user_ids: list[int] | None = None,
+    price_per_packet: Decimal | None = None,
+) -> DrinkSession:
+    """
+    Update an existing drink session.
+
+    ADMIN:
+        Can edit any session at any time.
+
+    USER:
+        Can edit only sessions they created,
+        and only within 3 days of the session date.
+
+    total_cost and participant amounts are always recalculated.
+    """
+
+    if not _can_modify_session(
+        session=drink_session,
+        current_user=current_user,
+    ):
+        raise PermissionError(
+            "You do not have permission to edit this session"
+        )
+
+    # Keep existing values when fields are omitted.
+    new_session_date = (
+        session_date
+        if session_date is not None
+        else drink_session.session_date
+    )
+
+    new_packets_used = (
+        Decimal(packets_used)
+        if packets_used is not None
+        else drink_session.packets_used
+    )
+
+    new_price_per_packet = (
+        Decimal(price_per_packet)
+        if price_per_packet is not None
+        else drink_session.price_per_packet
+    )
+
+    if new_packets_used <= 0:
+        raise ValueError(
+            "Packets used must be greater than zero"
+        )
+
+    if new_price_per_packet <= 0:
+        raise ValueError(
+            "Price per packet must be greater than zero"
+        )
+
+    if participant_user_ids is None:
+        participant_user_ids = [
+            participant.user_id
+            for participant in drink_session.participants
+        ]
+
+    _validate_participants(
+        db,
+        participant_user_ids,
+    )
+
+    # Recalculate all financial values server-side.
+    total_cost = calculate_session_total(
+        new_packets_used,
+        new_price_per_packet,
+    )
+
+    split = split_session_cost(
+        total_cost,
+        participant_user_ids,
+    )
+
+    # Update session fields.
+    drink_session.session_date = new_session_date
+    drink_session.packets_used = new_packets_used
+    drink_session.price_per_packet = new_price_per_packet
+    drink_session.total_cost = total_cost
+
+    # Rebuild participant rows so the amounts always match
+    # the new session configuration.
+    drink_session.participants = [
+        SessionParticipant(
+            user_id=user_id,
+            amount_owed=amount,
+        )
+        for user_id, amount in split.items()
+    ]
+
+    db.flush()
+
+    return drink_session
+
+
+# ============================================================================
+# DELETE
+# ============================================================================
+
+
+def delete_drink_session(
+    db: DbSession,
+    *,
+    drink_session: DrinkSession,
+    current_user: User,
+) -> None:
+    """
+    Delete an existing drink session.
+
+    ADMIN:
+        Can delete any session at any time.
+
+    USER:
+        Can delete only sessions they created,
+        and only within 3 days of the session date.
+    """
+
+    if not _can_modify_session(
+        session=drink_session,
+        current_user=current_user,
+    ):
+        raise PermissionError(
+            "You do not have permission to delete this session"
+        )
+
+    db.delete(drink_session)
+    db.flush()

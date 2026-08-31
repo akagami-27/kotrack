@@ -2,12 +2,31 @@
 Payment API endpoints.
 
 Users can submit and view their own payments.
-Administrators can review, confirm, or reject payments.
+Administrators can review, confirm, reject, and download receipts.
+
+Receipt files:
+- Any file type is accepted.
+- Maximum file size: 25 MB.
+- Receipt bytes are stored in the database.
+- SHA-256 is stored for integrity verification.
+- Uploaded files are never executed by the application.
 
 Business rules are handled by app.services.payment_service.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import hashlib
+from datetime import datetime, timezone
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    status,
+)
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -16,7 +35,7 @@ from app.db.session import get_db
 from app.models.enums import PaymentStatus
 from app.models.payment import Payment
 from app.models.user import User
-from app.schemas.payment import PaymentCreate, PaymentRead
+from app.schemas.payment import PaymentRead
 from app.services.payment_service import (
     confirm_payment,
     create_payment,
@@ -31,6 +50,14 @@ router = APIRouter(
 
 
 # ============================================================================
+# RECEIPT SETTINGS
+# ============================================================================
+
+MAX_RECEIPT_SIZE = 25 * 1024 * 1024  # 25 MB
+RECEIPT_READ_CHUNK_SIZE = 1024 * 1024  # 1 MB
+
+
+# ============================================================================
 # USER PAYMENT ENDPOINTS
 # ============================================================================
 
@@ -40,23 +67,131 @@ router = APIRouter(
     response_model=PaymentRead,
     status_code=status.HTTP_201_CREATED,
 )
-def submit_payment(
-    payment_data: PaymentCreate,
+async def submit_payment(
+    amount: str = Form(...),
+    receipt: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
-    Submit a payment for the authenticated user.
+    Submit a payment with a receipt.
 
-    New payments always start as PENDING.
-    Users cannot choose or modify the payment status.
+    The payment always starts as PENDING.
+
+    The user cannot choose or modify the payment status.
+
+    Receipt:
+        - Any file type is accepted.
+        - Maximum size is 25 MB.
+        - Original filename is preserved.
+        - Content type is preserved.
+        - SHA-256 hash is calculated.
     """
+
+    # ------------------------------------------------------------------------
+    # Validate amount
+    # ------------------------------------------------------------------------
+
+    from decimal import Decimal, InvalidOperation
+
+    try:
+        payment_amount = Decimal(amount)
+    except (InvalidOperation, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid payment amount",
+        )
+
+    if payment_amount <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payment amount must be greater than zero",
+        )
+
+    # ------------------------------------------------------------------------
+    # Validate receipt
+    # ------------------------------------------------------------------------
+
+    if receipt.filename is None or not receipt.filename.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Receipt file is required",
+        )
+
+    filename = receipt.filename.strip()
+
+    if len(filename) > 255:
+        filename = filename[:255]
+
+    # ------------------------------------------------------------------------
+    # Read receipt safely
+    # ------------------------------------------------------------------------
+
+    receipt_chunks: list[bytes] = []
+    total_size = 0
+    sha256 = hashlib.sha256()
+
+    try:
+        while True:
+            chunk = await receipt.read(
+                RECEIPT_READ_CHUNK_SIZE
+            )
+
+            if not chunk:
+                break
+
+            total_size += len(chunk)
+
+            if total_size > MAX_RECEIPT_SIZE:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail="Receipt file must not exceed 25 MB",
+                )
+
+            receipt_chunks.append(chunk)
+            sha256.update(chunk)
+
+    finally:
+        await receipt.close()
+
+    if total_size == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Receipt file cannot be empty",
+        )
+
+    receipt_data = b"".join(receipt_chunks)
+
+    receipt_hash = sha256.hexdigest()
+
+    content_type = (
+        receipt.content_type
+        if receipt.content_type
+        else "application/octet-stream"
+    )
+
+    # ------------------------------------------------------------------------
+    # Create payment
+    # ------------------------------------------------------------------------
 
     try:
         payment = create_payment(
             db,
             user_id=current_user.id,
-            amount=payment_data.amount,
+            amount=payment_amount,
+        )
+
+        # --------------------------------------------------------------------
+        # Attach receipt
+        # --------------------------------------------------------------------
+
+        payment.receipt_data = receipt_data
+        payment.receipt_filename = filename
+        payment.receipt_content_type = content_type
+        payment.receipt_file_size = total_size
+        payment.receipt_sha256 = receipt_hash
+        payment.receipt_uploaded_at = datetime.now(
+            timezone.utc
         )
 
         db.commit()
@@ -71,6 +206,15 @@ def submit_payment(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+
+    except Exception:
+        db.rollback()
+        raise
+
+
+# ============================================================================
+# USER PAYMENT LIST
+# ============================================================================
 
 
 @router.get(
@@ -94,6 +238,88 @@ def list_my_payments(
             Payment.created_at.desc()
         )
     ).all()
+
+
+# ============================================================================
+# RECEIPT DOWNLOAD
+# ============================================================================
+
+
+@router.get(
+    "/{payment_id}/receipt",
+)
+def download_payment_receipt(
+    payment_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Download a payment receipt.
+
+    USER:
+        Can only download their own receipt.
+
+    ADMIN:
+        Can download any payment receipt.
+    """
+
+    payment = db.scalar(
+        select(Payment).where(
+            Payment.id == payment_id
+        )
+    )
+
+    if payment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payment not found",
+        )
+
+    # ------------------------------------------------------------------------
+    # Authorization
+    # ------------------------------------------------------------------------
+
+    if (
+        current_user.role.value != "ADMIN"
+        and payment.user_id != current_user.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payment not found",
+        )
+
+    # ------------------------------------------------------------------------
+    # Receipt existence
+    # ------------------------------------------------------------------------
+
+    if payment.receipt_data is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Receipt not found",
+        )
+
+    filename = (
+        payment.receipt_filename
+        or "payment-receipt"
+    )
+
+    content_type = (
+        payment.receipt_content_type
+        or "application/octet-stream"
+    )
+
+    return Response(
+        content=payment.receipt_data,
+        media_type=content_type,
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{filename}"'
+            ),
+            "X-Receipt-SHA256": (
+                payment.receipt_sha256 or ""
+            ),
+        },
+    )
 
 
 # ============================================================================
@@ -148,6 +374,11 @@ def list_pending_payments(
     ).all()
 
 
+# ============================================================================
+# CONFIRM PAYMENT
+# ============================================================================
+
+
 @router.patch(
     "/{payment_id}/confirm",
     response_model=PaymentRead,
@@ -190,6 +421,11 @@ def confirm_payment_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+
+
+# ============================================================================
+# REJECT PAYMENT
+# ============================================================================
 
 
 @router.patch(

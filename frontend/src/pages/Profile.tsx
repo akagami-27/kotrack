@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useState,
   type ChangeEvent,
 } from 'react'
@@ -16,11 +17,16 @@ type UserProfile = {
   avatar_data: string | null
 }
 
+const MAX_IMAGE_SIZE = 20 * 1024 * 1024
+const MAX_AVATAR_SIZE = 450_000
+const AVATAR_SIZE = 256
+
 export default function Profile() {
   const { user, updateUser } = useAuth()
 
-  const [name, setName] =
-    useState(user?.name ?? '')
+  const [name, setName] = useState(
+    user?.name ?? '',
+  )
 
   const [avatar, setAvatar] =
     useState<string | null>(
@@ -30,44 +36,103 @@ export default function Profile() {
   const [saving, setSaving] =
     useState(false)
 
+  const [loading, setLoading] =
+    useState(true)
+
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+
+  /* ---------------------------------------------------------------------- */
+  /* LOAD PROFILE                                                           */
+  /* ---------------------------------------------------------------------- */
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadProfile() {
+      try {
+        setError('')
+
+        const data =
+          await apiRequest<UserProfile>(
+            '/api/users/me',
+          )
+
+        if (cancelled) {
+          return
+        }
+
+        setName(data.name)
+        setAvatar(data.avatar_data)
+      } catch (err) {
+        if (cancelled) {
+          return
+        }
+
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'Unable to load profile.',
+        )
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      }
+    }
+
+    loadProfile()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  /* ---------------------------------------------------------------------- */
+  /* CHANGE IMAGE                                                           */
+  /* ---------------------------------------------------------------------- */
 
   async function handleImageChange(
     event: ChangeEvent<HTMLInputElement>,
   ) {
     const file =
-      event.target.files?.[0]
+      event.target.files?.[0] ?? null
 
-    if (!file) {
+    // Reset the input so the same photo
+    // can be selected again later.
+    event.target.value = ''
+
+    if (!file || saving) {
       return
     }
 
-    try {
-      setError('')
-      setSuccess('')
+    setError('')
+    setSuccess('')
 
+    try {
       const compressed =
         await compressAvatar(file)
 
       setAvatar(compressed)
 
       setSuccess(
-        'New profile picture selected. Save your profile to apply it.',
+        'Picture selected. Tap Save profile to apply it.',
       )
     } catch (err) {
       setError(
         err instanceof Error
           ? err.message
-          : 'Unable to process image.',
+          : 'Unable to process this picture.',
       )
-    } finally {
-      event.target.value = ''
     }
   }
 
+  /* ---------------------------------------------------------------------- */
+  /* REMOVE IMAGE                                                           */
+  /* ---------------------------------------------------------------------- */
+
   async function handleRemoveAvatar() {
-    if (!avatar) {
+    if (!avatar || saving) {
       return
     }
 
@@ -87,8 +152,7 @@ export default function Profile() {
           },
         )
 
-      setAvatar(updated.avatar_data)
-
+      setAvatar(null)
       updateUser(updated)
 
       setSuccess(
@@ -105,12 +169,19 @@ export default function Profile() {
     }
   }
 
+  /* ---------------------------------------------------------------------- */
+  /* SAVE PROFILE                                                           */
+  /* ---------------------------------------------------------------------- */
+
   async function handleSave() {
-    const trimmedName =
-      name.trim()
+    const trimmedName = name.trim()
 
     if (!trimmedName) {
       setError('Name cannot be empty.')
+      return
+    }
+
+    if (saving) {
       return
     }
 
@@ -150,10 +221,30 @@ export default function Profile() {
     }
   }
 
-  return (
-    <main className="min-h-screen overflow-hidden bg-[#070910] text-white">
+  /* ---------------------------------------------------------------------- */
+  /* LOADING                                                                */
+  /* ---------------------------------------------------------------------- */
 
-      {/* Ambient background */}
+  if (loading) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#070910] text-white">
+        <p className="text-xs text-white/40 sm:text-sm">
+          Loading profile...
+        </p>
+      </main>
+    )
+  }
+
+  const displayName =
+    name.trim() || 'Your profile'
+
+  const initial =
+    name.trim().charAt(0).toUpperCase() || '?'
+
+  return (
+    <main className="min-h-screen overflow-x-hidden bg-[#070910] text-white">
+      {/* Background */}
+
       <div className="pointer-events-none fixed inset-0">
         <div className="absolute left-1/2 top-[-300px] h-[600px] w-[600px] -translate-x-1/2 rounded-full bg-violet-500/[0.07] blur-[150px]" />
 
@@ -161,25 +252,25 @@ export default function Profile() {
       </div>
 
       {/* Header */}
-      <header className="relative z-10 border-b border-white/[0.06]">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-5 sm:px-8">
 
+      <header className="relative z-10 border-b border-white/[0.06]">
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4 sm:px-8 sm:py-5">
           <Link
             to="/dashboard"
-            className="flex items-center gap-3"
+            className="flex items-center gap-2.5"
           >
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04]">
-              <span className="font-bold">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] sm:h-9 sm:w-9 sm:rounded-xl">
+              <span className="text-sm font-bold">
                 K
               </span>
             </div>
 
             <div>
-              <p className="text-sm font-semibold">
+              <p className="text-xs font-semibold sm:text-sm">
                 KoTrack
               </p>
 
-              <p className="text-[10px] uppercase tracking-wider text-white/25">
+              <p className="text-[8px] uppercase tracking-wider text-white/25 sm:text-[10px]">
                 Profile
               </p>
             </div>
@@ -187,52 +278,51 @@ export default function Profile() {
 
           <Link
             to="/dashboard"
-            className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-xs text-white/50 transition hover:bg-white/[0.07] hover:text-white"
+            className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-[10px] text-white/50 transition hover:bg-white/[0.07] hover:text-white sm:px-4 sm:text-xs"
           >
             Dashboard
           </Link>
-
         </div>
       </header>
 
       {/* Content */}
-      <div className="relative z-10 mx-auto max-w-3xl px-5 py-10 sm:px-8">
 
+      <div className="relative z-10 mx-auto max-w-3xl px-4 py-6 sm:px-8 sm:py-10">
         {/* Heading */}
-        <div className="mb-8">
 
-          <p className="text-xs uppercase tracking-[0.16em] text-white/25">
+        <div className="mb-5 sm:mb-8">
+          <p className="text-[9px] uppercase tracking-[0.16em] text-white/25 sm:text-xs">
             Account
           </p>
 
-          <div className="mt-3 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-
+          <div className="mt-2 flex flex-col gap-3 sm:mt-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <h1 className="text-3xl font-semibold tracking-tight">
+              <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
                 Profile
               </h1>
 
-              <p className="mt-2 text-sm text-white/35">
-                Manage your account information and profile picture.
+              <p className="mt-1.5 text-[10px] leading-4 text-white/35 sm:mt-2 sm:text-sm sm:leading-5">
+                Manage your account information and
+                profile picture.
               </p>
             </div>
 
             <Link
               to="/settings"
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-xs font-medium text-white/55 transition hover:border-violet-400/20 hover:bg-white/[0.07] hover:text-white"
+              className="inline-flex w-fit items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-[10px] font-medium text-white/55 transition hover:bg-white/[0.07] hover:text-white sm:px-4 sm:py-2.5 sm:text-xs"
             >
               <SettingsIcon />
               Settings
             </Link>
-
           </div>
         </div>
 
         {/* Messages */}
+
         {(error || success) && (
           <div
             role="alert"
-            className={`mb-6 rounded-xl border px-4 py-3 text-sm ${
+            className={`mb-4 rounded-xl border px-3 py-2.5 text-[10px] leading-4 sm:mb-6 sm:px-4 sm:py-3 sm:text-sm ${
               error
                 ? 'border-red-400/10 bg-red-400/[0.05] text-red-300'
                 : 'border-emerald-400/10 bg-emerald-400/[0.05] text-emerald-300'
@@ -242,50 +332,55 @@ export default function Profile() {
           </div>
         )}
 
-        {/* Profile card */}
-        <section className="rounded-3xl border border-white/[0.08] bg-white/[0.025] p-6 shadow-[0_30px_100px_rgba(0,0,0,0.25)] backdrop-blur-xl sm:p-8">
+        {/* Profile */}
 
+        <section className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4 shadow-[0_30px_100px_rgba(0,0,0,0.25)] backdrop-blur-xl sm:rounded-3xl sm:p-8">
           {/* Avatar */}
-          <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
 
-            <div className="shrink-0">
-
+          <div className="grid gap-4 sm:grid-cols-[auto_1fr] sm:items-center sm:gap-6">
+            <div className="flex justify-center sm:justify-start">
               {avatar ? (
                 <img
                   src={avatar}
                   alt="Profile avatar"
-                  className="h-28 w-28 rounded-3xl border border-white/10 object-cover shadow-[0_0_40px_rgba(139,92,246,0.08)]"
+                  loading="lazy"
+                  decoding="async"
+                  className="h-24 w-24 rounded-2xl border border-white/10 object-cover sm:h-28 sm:w-28 sm:rounded-3xl"
                 />
               ) : (
-                <div className="flex h-28 w-28 items-center justify-center rounded-3xl border border-white/10 bg-gradient-to-br from-violet-400/[0.12] to-blue-400/[0.08] text-4xl font-semibold text-white/70">
-                  {name
-                    .charAt(0)
-                    .toUpperCase() || '?'}
+                <div className="flex h-24 w-24 items-center justify-center rounded-2xl border border-white/10 bg-gradient-to-br from-violet-400/[0.12] to-blue-400/[0.08] text-3xl font-semibold text-white/70 sm:h-28 sm:w-28 sm:rounded-3xl sm:text-4xl">
+                  {initial}
                 </div>
               )}
-
             </div>
 
-            <div className="min-w-0">
+            {/* Avatar controls */}
 
-              <p className="text-xs uppercase tracking-[0.14em] text-white/25">
+            <div className="min-w-0 text-center sm:text-left">
+              <p className="text-[9px] uppercase tracking-[0.14em] text-white/25 sm:text-xs">
                 Profile picture
               </p>
 
-              <h2 className="mt-2 text-lg font-semibold">
-                {name || 'Your profile'}
+              <h2 className="mt-1.5 truncate text-base font-semibold sm:mt-2 sm:text-lg">
+                {displayName}
               </h2>
 
-              <p className="mt-2 max-w-md text-xs leading-5 text-white/30">
-                Images are automatically resized to a maximum
-                of 256×256 pixels and converted to compressed
-                WebP before being uploaded.
+              <p className="mx-auto mt-1.5 max-w-md text-[9px] leading-4 text-white/30 sm:mx-0 sm:mt-2 sm:text-xs sm:leading-5">
+                JPG, PNG, WebP and other browser-supported
+                image files are automatically resized and
+                converted to WebP.
               </p>
 
-              <div className="mt-4 flex flex-wrap gap-2">
+              <div className="mt-3 flex flex-col gap-2 sm:mt-4 sm:flex-row">
+                {/* Change */}
 
-                <label className="cursor-pointer rounded-xl bg-white px-4 py-2.5 text-xs font-semibold text-black transition hover:bg-white/90">
-
+                <label
+                  className={`inline-flex min-h-10 cursor-pointer items-center justify-center rounded-xl bg-white px-4 py-2.5 text-[10px] font-semibold text-black transition hover:bg-white/90 sm:text-xs ${
+                    saving
+                      ? 'pointer-events-none opacity-50'
+                      : ''
+                  }`}
+                >
                   Change picture
 
                   <input
@@ -293,38 +388,36 @@ export default function Profile() {
                     accept="image/*"
                     onChange={handleImageChange}
                     disabled={saving}
-                    className="hidden"
+                    className="sr-only"
                   />
-
                 </label>
+
+                {/* Remove */}
 
                 {avatar && (
                   <button
                     type="button"
                     onClick={handleRemoveAvatar}
                     disabled={saving}
-                    className="rounded-xl border border-white/10 px-4 py-2.5 text-xs text-white/50 transition hover:border-red-400/20 hover:bg-red-400/[0.05] hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="inline-flex min-h-10 items-center justify-center rounded-xl border border-white/10 px-4 py-2.5 text-[10px] text-white/50 transition hover:border-red-400/20 hover:bg-red-400/[0.05] hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-40 sm:text-xs"
                   >
                     {saving
                       ? 'Removing...'
                       : 'Remove picture'}
                   </button>
                 )}
-
               </div>
-
             </div>
-
           </div>
 
-          <div className="my-8 border-t border-white/[0.06]" />
+          <div className="my-5 border-t border-white/[0.06] sm:my-8" />
 
           {/* Name */}
-          <div>
 
+          <div>
             <label
               htmlFor="profile-name"
-              className="mb-2 block text-xs font-medium text-white/50"
+              className="mb-1.5 block text-[10px] font-medium text-white/50 sm:mb-2 sm:text-xs"
             >
               Name
             </label>
@@ -338,14 +431,14 @@ export default function Profile() {
               }
               maxLength={255}
               disabled={saving}
-              className="w-full rounded-xl border border-white/[0.08] bg-black/20 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/15 focus:border-violet-400/30 focus:bg-white/[0.03] disabled:cursor-not-allowed disabled:opacity-50"
+              autoComplete="name"
+              className="min-h-10 w-full rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2.5 text-xs text-white outline-none transition placeholder:text-white/15 focus:border-violet-400/30 focus:bg-white/[0.03] disabled:cursor-not-allowed disabled:opacity-50 sm:px-4 sm:py-3 sm:text-sm"
             />
-
           </div>
 
           {/* Account information */}
-          <div className="mt-5 grid gap-5 sm:grid-cols-2">
 
+          <div className="mt-4 grid grid-cols-2 gap-2.5 sm:mt-5 sm:gap-5">
             <ProfileValue
               label="User ID"
               value={`#${user?.id ?? '—'}`}
@@ -382,10 +475,10 @@ export default function Profile() {
                   : '—'
               }
             />
-
           </div>
 
           {/* Save */}
+
           <button
             type="button"
             onClick={handleSave}
@@ -393,50 +486,45 @@ export default function Profile() {
               saving ||
               !name.trim()
             }
-            className="mt-7 w-full rounded-xl bg-white py-3 text-xs font-semibold text-black shadow-[0_0_30px_rgba(255,255,255,0.05)] transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="mt-5 min-h-10 w-full rounded-xl bg-white py-2.5 text-xs font-semibold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50 sm:mt-7 sm:py-3"
           >
             {saving
               ? 'Saving changes...'
               : 'Save profile'}
           </button>
-
         </section>
 
         {/* Settings */}
-        <section className="mt-6 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-5">
 
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-
+        <section className="mt-4 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3.5 sm:mt-6 sm:p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm font-medium text-white/65">
+              <p className="text-xs font-medium text-white/65 sm:text-sm">
                 Account settings
               </p>
 
-              <p className="mt-1 text-xs leading-5 text-white/30">
-                Change your password and manage account security.
+              <p className="mt-1 text-[9px] leading-4 text-white/30 sm:text-xs sm:leading-5">
+                Change your password and manage account
+                security.
               </p>
             </div>
 
             <Link
               to="/settings"
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-xs font-medium text-white/50 transition hover:border-violet-400/20 hover:bg-white/[0.07] hover:text-white"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-[10px] font-medium text-white/50 transition hover:bg-white/[0.07] hover:text-white sm:text-xs"
             >
               Open settings
               <ArrowIcon />
             </Link>
-
           </div>
-
         </section>
-
       </div>
     </main>
   )
 }
 
-
 /* ========================================================================= */
-/* Profile Value                                                             */
+/* Profile Value                                                            */
 /* ========================================================================= */
 
 function ProfileValue({
@@ -447,23 +535,20 @@ function ProfileValue({
   value: string
 }) {
   return (
-    <div>
-
-      <p className="mb-2 text-xs font-medium text-white/50">
+    <div className="min-w-0">
+      <p className="mb-1.5 text-[9px] font-medium text-white/50 sm:mb-2 sm:text-xs">
         {label}
       </p>
 
-      <div className="rounded-xl border border-white/[0.06] bg-black/10 px-4 py-3 text-sm text-white/40">
+      <div className="truncate rounded-xl border border-white/[0.06] bg-black/10 px-3 py-2.5 text-[10px] text-white/40 sm:px-4 sm:py-3 sm:text-sm">
         {value}
       </div>
-
     </div>
   )
 }
 
-
 /* ========================================================================= */
-/* Avatar Compression                                                        */
+/* Avatar Compression                                                       */
 /* ========================================================================= */
 
 async function compressAvatar(
@@ -471,48 +556,49 @@ async function compressAvatar(
 ): Promise<string> {
   if (!file.type.startsWith('image/')) {
     throw new Error(
-      'Please select an image file.',
+      'Please select a valid image file.',
     )
   }
 
-  if (file.size > 10 * 1024 * 1024) {
+  if (file.size <= 0) {
     throw new Error(
-      'Please select an image smaller than 10 MB.',
+      'The selected image is empty.',
     )
   }
 
-  if (!('createImageBitmap' in window)) {
+  if (file.size > MAX_IMAGE_SIZE) {
     throw new Error(
-      'Your browser does not support image processing.',
+      'Please select an image smaller than 20 MB.',
     )
   }
 
-  const bitmap =
-    await createImageBitmap(file)
+  const objectUrl =
+    URL.createObjectURL(file)
 
   try {
-    const maxSize = 256
+    const image =
+      await loadImage(objectUrl)
 
     const scale = Math.min(
       1,
-      maxSize /
+      AVATAR_SIZE /
         Math.max(
-          bitmap.width,
-          bitmap.height,
+          image.naturalWidth,
+          image.naturalHeight,
         ),
     )
 
     const width = Math.max(
       1,
       Math.round(
-        bitmap.width * scale,
+        image.naturalWidth * scale,
       ),
     )
 
     const height = Math.max(
       1,
       Math.round(
-        bitmap.height * scale,
+        image.naturalHeight * scale,
       ),
     )
 
@@ -531,43 +617,118 @@ async function compressAvatar(
       )
     }
 
+    context.imageSmoothingEnabled = true
+    context.imageSmoothingQuality = 'high'
+
     context.drawImage(
-      bitmap,
+      image,
       0,
       0,
       width,
       height,
     )
 
-    const result =
+    /*
+     * The backend requires WebP.
+     */
+    const webp =
       canvas.toDataURL(
         'image/webp',
-        0.8,
+        0.82,
       )
 
+    /*
+     * Safari/browser does not support WebP
+     * conversion through Canvas.
+     */
     if (
-      !result.startsWith(
+      !webp.startsWith(
         'data:image/webp;base64,',
       )
     ) {
       throw new Error(
-        'Your browser could not create a WebP image.',
+        'This browser cannot convert the selected picture to WebP. Please update Safari or use a newer browser.',
       )
     }
 
-    if (result.length > 450_000) {
-      throw new Error(
-        'The compressed image is still too large. Please choose another picture.',
-      )
+    /*
+     * Try stronger compression if necessary.
+     */
+    if (webp.length > MAX_AVATAR_SIZE) {
+      const smaller =
+        canvas.toDataURL(
+          'image/webp',
+          0.65,
+        )
+
+      if (
+        !smaller.startsWith(
+          'data:image/webp;base64,',
+        )
+      ) {
+        throw new Error(
+          'Unable to create a compatible WebP image.',
+        )
+      }
+
+      if (
+        smaller.length >
+        MAX_AVATAR_SIZE
+      ) {
+        throw new Error(
+          'The image is still too large after compression. Please choose another picture.',
+        )
+      }
+
+      return smaller
     }
 
-    return result
-
+    return webp
   } finally {
-    bitmap.close()
+    URL.revokeObjectURL(objectUrl)
   }
 }
 
+/* ========================================================================= */
+/* Image Loader                                                              */
+/* ========================================================================= */
+
+function loadImage(
+  source: string,
+): Promise<HTMLImageElement> {
+  return new Promise(
+    (resolve, reject) => {
+      const image =
+        new Image()
+
+      image.onload = () => {
+        if (
+          image.naturalWidth <= 0 ||
+          image.naturalHeight <= 0
+        ) {
+          reject(
+            new Error(
+              'The selected image could not be read.',
+            ),
+          )
+          return
+        }
+
+        resolve(image)
+      }
+
+      image.onerror = () => {
+        reject(
+          new Error(
+            'This image format cannot be read by your browser. Please try JPG or PNG.',
+          ),
+        )
+      }
+
+      image.src = source
+    },
+  )
+}
 
 /* ========================================================================= */
 /* Icons                                                                     */
@@ -582,6 +743,7 @@ function SettingsIcon() {
       fill="none"
       stroke="currentColor"
       strokeWidth="1.7"
+      aria-hidden="true"
     >
       <circle
         cx="12"
@@ -594,7 +756,6 @@ function SettingsIcon() {
   )
 }
 
-
 function ArrowIcon() {
   return (
     <svg
@@ -604,6 +765,7 @@ function ArrowIcon() {
       fill="none"
       stroke="currentColor"
       strokeWidth="1.7"
+      aria-hidden="true"
     >
       <path d="M5 12h13" />
       <path d="m13 6 6 6-6 6" />

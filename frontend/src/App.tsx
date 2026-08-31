@@ -18,7 +18,6 @@ import RequestSession from './pages/RequestSession'
 import Sessions from './pages/Sessions'
 import Settings from './pages/Settings'
 
-
 function App() {
   const { user, loading } = useAuth()
 
@@ -34,11 +33,19 @@ function App() {
 
   return (
     <Routes>
-
       {/* Public landing page */}
       <Route
         path="/"
-        element={<Landing />}
+        element={
+          user ? (
+            <Navigate
+              to="/dashboard"
+              replace
+            />
+          ) : (
+            <Landing />
+          )
+        }
       />
 
       {/* Login */}
@@ -201,7 +208,6 @@ function App() {
           />
         }
       />
-
     </Routes>
   )
 }

@@ -2,21 +2,30 @@
 Drink session API endpoints.
 
 Session costs are always calculated server-side.
-Clients cannot supply or modify total_cost or amount_owed.
-
-Direct session creation is ADMIN-only.
-Normal users must submit a session request instead.
 
 Access rules:
-- ADMIN users can view all drink sessions.
-- Normal users can only view sessions they participated in.
+
+ADMIN:
+    - View all sessions
+    - Create sessions
+    - Edit any session
+    - Delete any session
+
+USER:
+    - View sessions they participated in
+    - Cannot directly create sessions
+    - Edit their own created sessions within 3 days
+    - Delete their own created sessions within 3 days
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.core.dependencies import get_current_user, require_admin
+from app.core.dependencies import (
+    get_current_user,
+    require_admin,
+)
 from app.db.session import get_db
 from app.models.drink_session import (
     DEFAULT_PRICE_PER_PACKET,
@@ -28,8 +37,13 @@ from app.models.user import User
 from app.schemas.drink_session import (
     DrinkSessionCreate,
     DrinkSessionRead,
+    DrinkSessionUpdate,
 )
-from app.services.session_service import create_drink_session
+from app.services.session_service import (
+    create_drink_session,
+    delete_drink_session,
+    update_drink_session,
+)
 
 
 router = APIRouter(
@@ -38,9 +52,10 @@ router = APIRouter(
 )
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
 # CREATE SESSION
-# ---------------------------------------------------------------------------
+# ============================================================================
+
 
 @router.post(
     "",
@@ -56,12 +71,14 @@ def create_session(
     Create a new drink session directly.
 
     Only ADMIN users can create sessions directly.
-    Normal users must use /api/session-requests instead.
+    Normal users must use /api/session-requests.
     """
 
     users = db.scalars(
         select(User).where(
-            User.id.in_(session_data.participant_user_ids)
+            User.id.in_(
+                session_data.participant_user_ids
+            )
         )
     ).all()
 
@@ -95,21 +112,25 @@ def create_session(
             db,
             session_date=session_data.session_date,
             packets_used=session_data.packets_used,
-            participant_user_ids=session_data.participant_user_ids,
+            participant_user_ids=(
+                session_data.participant_user_ids
+            ),
             created_by=current_user.id,
             price_per_packet=price_per_packet,
         )
 
-        # The service commits and refreshes the session.
-        # Explicitly load participants + users before Pydantic serialization.
         drink_session = db.scalar(
             select(DrinkSession)
             .options(
-                selectinload(DrinkSession.participants)
-                .selectinload(SessionParticipant.user)
+                selectinload(
+                    DrinkSession.participants
+                ).selectinload(
+                    SessionParticipant.user
+                )
             )
             .where(
-                DrinkSession.id == drink_session.id
+                DrinkSession.id
+                == drink_session.id
             )
         )
 
@@ -124,9 +145,10 @@ def create_session(
         ) from exc
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
 # LIST SESSIONS
-# ---------------------------------------------------------------------------
+# ============================================================================
+
 
 @router.get(
     "",
@@ -140,22 +162,21 @@ def list_sessions(
     Return drink sessions.
 
     ADMIN:
-        Can see every session.
+        All sessions.
 
     USER:
-        Can only see sessions where they are a participant.
+        Only sessions they participated in.
     """
-
-    # -----------------------------------------------------------------------
-    # ADMIN: see everything
-    # -----------------------------------------------------------------------
 
     if current_user.role == UserRole.ADMIN:
         stmt = (
             select(DrinkSession)
             .options(
-                selectinload(DrinkSession.participants)
-                .selectinload(SessionParticipant.user)
+                selectinload(
+                    DrinkSession.participants
+                ).selectinload(
+                    SessionParticipant.user
+                )
             )
             .order_by(
                 DrinkSession.session_date.desc()
@@ -166,15 +187,14 @@ def list_sessions(
             db.scalars(stmt).unique().all()
         )
 
-    # -----------------------------------------------------------------------
-    # USER: only sessions they participated in
-    # -----------------------------------------------------------------------
-
     stmt = (
         select(DrinkSession)
         .options(
-            selectinload(DrinkSession.participants)
-            .selectinload(SessionParticipant.user)
+            selectinload(
+                DrinkSession.participants
+            ).selectinload(
+                SessionParticipant.user
+            )
         )
         .join(
             SessionParticipant,
@@ -195,9 +215,10 @@ def list_sessions(
     )
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
 # GET SINGLE SESSION
-# ---------------------------------------------------------------------------
+# ============================================================================
+
 
 @router.get(
     "/{session_id}",
@@ -215,14 +236,17 @@ def get_session(
         Can view any session.
 
     USER:
-        Can only view a session if they participated in it.
+        Can only view sessions they participated in.
     """
 
     stmt = (
         select(DrinkSession)
         .options(
-            selectinload(DrinkSession.participants)
-            .selectinload(SessionParticipant.user)
+            selectinload(
+                DrinkSession.participants
+            ).selectinload(
+                SessionParticipant.user
+            )
         )
         .where(
             DrinkSession.id == session_id
@@ -237,25 +261,181 @@ def get_session(
             detail="Drink session not found",
         )
 
-    # ADMIN can view any session.
     if current_user.role == UserRole.ADMIN:
         return drink_session
 
-    # USER must be a participant.
     participant = db.scalar(
         select(SessionParticipant).where(
-            SessionParticipant.session_id == session_id,
-            SessionParticipant.user_id == current_user.id,
+            SessionParticipant.session_id
+            == session_id,
+            SessionParticipant.user_id
+            == current_user.id,
         )
     )
 
     if participant is None:
-        # Deliberately return 404 instead of 403.
-        # This prevents users from discovering sessions
-        # that they are not allowed to access.
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Drink session not found",
         )
 
     return drink_session
+
+
+# ============================================================================
+# UPDATE SESSION
+# ============================================================================
+
+
+@router.patch(
+    "/{session_id}",
+    response_model=DrinkSessionRead,
+)
+def update_session(
+    session_id: int,
+    session_data: DrinkSessionUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Update an existing drink session.
+
+    ADMIN:
+        Can edit any session at any time.
+
+    USER:
+        Can edit only sessions they created,
+        and only within 3 days of the session date.
+
+    Financial values are recalculated server-side.
+    """
+
+    stmt = (
+        select(DrinkSession)
+        .options(
+            selectinload(
+                DrinkSession.participants
+            ).selectinload(
+                SessionParticipant.user
+            )
+        )
+        .where(
+            DrinkSession.id == session_id
+        )
+    )
+
+    drink_session = db.scalar(stmt)
+
+    if drink_session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Drink session not found",
+        )
+
+    try:
+        drink_session = update_drink_session(
+            db,
+            drink_session=drink_session,
+            current_user=current_user,
+            session_date=session_data.session_date,
+            packets_used=session_data.packets_used,
+            participant_user_ids=(
+                session_data.participant_user_ids
+            ),
+            price_per_packet=(
+                session_data.price_per_packet
+            ),
+        )
+
+        db.commit()
+
+        # Reload relationships after commit so the response
+        # contains the current participant data.
+        drink_session = db.scalar(
+            select(DrinkSession)
+            .options(
+                selectinload(
+                    DrinkSession.participants
+                ).selectinload(
+                    SessionParticipant.user
+                )
+            )
+            .where(
+                DrinkSession.id == session_id
+            )
+        )
+
+        return drink_session
+
+    except PermissionError as exc:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+
+    except ValueError as exc:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+
+# ============================================================================
+# DELETE SESSION
+# ============================================================================
+
+
+@router.delete(
+    "/{session_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_session(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Delete an existing drink session.
+
+    ADMIN:
+        Can delete any session at any time.
+
+    USER:
+        Can delete only sessions they created,
+        and only within 3 days of the session date.
+    """
+
+    drink_session = db.scalar(
+        select(DrinkSession).where(
+            DrinkSession.id == session_id
+        )
+    )
+
+    if drink_session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Drink session not found",
+        )
+
+    try:
+        delete_drink_session(
+            db,
+            drink_session=drink_session,
+            current_user=current_user,
+        )
+
+        db.commit()
+
+        return None
+
+    except PermissionError as exc:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc

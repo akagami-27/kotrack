@@ -4,11 +4,6 @@ import { Link } from 'react-router-dom'
 import { apiRequest } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 
-
-// ============================================================================
-// TYPES
-// ============================================================================
-
 type Participant = {
   user_id: number
   user_name: string
@@ -31,7 +26,7 @@ type Payment = {
   id: number
   user_id: number
   amount: number | string
-  status: 'PENDING' | 'CONFIRMED' | 'REJECTED' | string
+  status: string
   created_at: string
   confirmed_at: string | null
   confirmed_by: number | null
@@ -62,113 +57,108 @@ type AnalyticsResponse = {
     pending_payments: number
     pending_session_requests: number
   }
-
   users: UserAnalytics[]
-
   highest_debt_users: UserAnalytics[]
-
   highest_spenders: HighestSpender[]
 }
 
+type PasswordResetRequest = {
+  id: number
+  user_id: number
+  username: string
+  created_at: string
+  approved_at: string | null
+  expires_at: string | null
+}
 
-// ============================================================================
-// CONSTANTS
-// ============================================================================
+type PasswordResetApproval = {
+  message: string
+  request_id: number
+  username: string
+  code: string
+  expires_at: string
+}
 
 const USERS_PER_PAGE = 8
-const HISTORY_PER_PAGE = 8
-
-
-// ============================================================================
-// PAGE
-// ============================================================================
 
 export default function AdminDashboard() {
   const { user } = useAuth()
 
-  const [requests, setRequests] =
-    useState<SessionRequest[]>([])
-
   const [analytics, setAnalytics] =
     useState<AnalyticsResponse | null>(null)
+
+  const [requests, setRequests] =
+    useState<SessionRequest[]>([])
 
   const [payments, setPayments] =
     useState<Payment[]>([])
 
-  const [paymentsLoading, setPaymentsLoading] =
-    useState(true)
+  const [resetRequests, setResetRequests] =
+    useState<PasswordResetRequest[]>([])
 
-  const [paymentProcessingId, setPaymentProcessingId] =
-    useState<number | null>(null)
+  const [resetCode, setResetCode] =
+    useState<PasswordResetApproval | null>(null)
 
-  const [loading, setLoading] =
-    useState(true)
-
-  const [analyticsLoading, setAnalyticsLoading] =
-    useState(true)
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [error, setError] = useState('')
 
   const [processingId, setProcessingId] =
     useState<number | null>(null)
 
-  const [error, setError] =
-    useState('')
+  const [paymentProcessingId, setPaymentProcessingId] =
+    useState<number | null>(null)
 
-  const [userPage, setUserPage] =
-    useState(1)
+  const [resetProcessingId, setResetProcessingId] =
+    useState<number | null>(null)
 
-  const [historyPage, setHistoryPage] =
-    useState(1)
-
-
-  // --------------------------------------------------------------------------
-  // LOAD DATA
-  // --------------------------------------------------------------------------
-
-  async function loadRequests() {
-    const data =
-      await apiRequest<SessionRequest[]>(
-        '/api/session-requests',
-      )
-
-    setRequests(data)
-  }
-
+  const [userPage, setUserPage] = useState(1)
 
   async function loadAnalytics() {
-    const data =
+    setAnalytics(
       await apiRequest<AnalyticsResponse>(
         '/api/admin/analytics',
-      )
-
-    setAnalytics(data)
+      ),
+    )
   }
 
+  async function loadRequests() {
+    setRequests(
+      await apiRequest<SessionRequest[]>(
+        '/api/session-requests',
+      ),
+    )
+  }
 
   async function loadPayments() {
-    const data =
+    setPayments(
       await apiRequest<Payment[]>(
         '/api/payments',
-      )
-
-    setPayments(data)
+      ),
+    )
   }
 
+  async function loadResetRequests() {
+    setResetRequests(
+      await apiRequest<PasswordResetRequest[]>(
+        '/api/admin/password-reset-requests',
+      ),
+    )
+  }
 
   async function loadDashboard() {
     setError('')
-    setLoading(true)
-    setAnalyticsLoading(true)
-    setPaymentsLoading(true)
+    setRefreshing(true)
 
     try {
       await Promise.all([
-        loadRequests(),
         loadAnalytics(),
+        loadRequests(),
         loadPayments(),
+        loadResetRequests(),
       ])
 
       setUserPage(1)
-      setHistoryPage(1)
     } catch (err) {
       setError(
         err instanceof Error
@@ -177,11 +167,9 @@ export default function AdminDashboard() {
       )
     } finally {
       setLoading(false)
-      setAnalyticsLoading(false)
-      setPaymentsLoading(false)
+      setRefreshing(false)
     }
   }
-
 
   useEffect(() => {
     if (user?.role === 'ADMIN') {
@@ -189,20 +177,16 @@ export default function AdminDashboard() {
     }
   }, [user])
 
-
-  // --------------------------------------------------------------------------
-  // REQUEST ACTIONS
-  // --------------------------------------------------------------------------
-
-  async function handleApprove(
-    requestId: number,
+  async function handleSessionAction(
+    id: number,
+    action: 'approve' | 'reject',
   ) {
-    setProcessingId(requestId)
+    setProcessingId(id)
     setError('')
 
     try {
       await apiRequest(
-        `/api/session-requests/${requestId}/approve`,
+        `/api/session-requests/${id}/${action}`,
         {
           method: 'POST',
         },
@@ -213,55 +197,23 @@ export default function AdminDashboard() {
       setError(
         err instanceof Error
           ? err.message
-          : 'Unable to approve request.',
+          : `Unable to ${action} request.`,
       )
     } finally {
       setProcessingId(null)
     }
   }
-
-
-  async function handleReject(
-    requestId: number,
-  ) {
-    setProcessingId(requestId)
-    setError('')
-
-    try {
-      await apiRequest(
-        `/api/session-requests/${requestId}/reject`,
-        {
-          method: 'POST',
-        },
-      )
-
-      await loadDashboard()
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : 'Unable to reject request.',
-      )
-    } finally {
-      setProcessingId(null)
-    }
-  }
-
-
-  // --------------------------------------------------------------------------
-  // PAYMENT ACTIONS
-  // --------------------------------------------------------------------------
 
   async function handlePaymentAction(
-    paymentId: number,
+    id: number,
     action: 'confirm' | 'reject',
   ) {
-    setPaymentProcessingId(paymentId)
+    setPaymentProcessingId(id)
     setError('')
 
     try {
       await apiRequest(
-        `/api/payments/${paymentId}/${action}`,
+        `/api/payments/${id}/${action}`,
         {
           method: 'PATCH',
         },
@@ -279,1687 +231,986 @@ export default function AdminDashboard() {
     }
   }
 
+  async function handleResetApproval(id: number) {
+    setResetProcessingId(id)
+    setResetCode(null)
+    setError('')
 
-  // --------------------------------------------------------------------------
-  // REQUEST ANALYTICS
-  // --------------------------------------------------------------------------
+    try {
+      const result =
+        await apiRequest<PasswordResetApproval>(
+          `/api/admin/password-reset-requests/${id}/approve`,
+          {
+            method: 'POST',
+          },
+        )
 
-  const pendingRequests =
-    useMemo(
-      () =>
-        requests.filter(
-          (request) =>
-            request.status === 'PENDING',
-        ),
-      [requests],
-    )
+      setResetCode(result)
 
+      await loadResetRequests()
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Unable to approve password reset.',
+      )
+    } finally {
+      setResetProcessingId(null)
+    }
+  }
 
-  const pendingPayments =
-    useMemo(
-      () =>
-        payments.filter(
-          (payment) =>
-            payment.status === 'PENDING',
-        ),
-      [payments],
-    )
+  const pendingRequests = useMemo(
+    () =>
+      requests.filter(
+        (request) => request.status === 'PENDING',
+      ),
+    [requests],
+  )
 
-
-  const approvedRequests =
-    useMemo(
-      () =>
-        requests.filter(
-          (request) =>
-            request.status === 'APPROVED',
-        ),
-      [requests],
-    )
-
-
-  const totalRequestedPackets =
-    useMemo(
-      () =>
-        requests.reduce(
-          (total, request) =>
-            total +
-            Number(
-              request.packets_used || 0,
-            ),
-          0,
-        ),
-      [requests],
-    )
-
-
-  const approvedPackets =
-    useMemo(
-      () =>
-        approvedRequests.reduce(
-          (total, request) =>
-            total +
-            Number(
-              request.packets_used || 0,
-            ),
-          0,
-        ),
-      [approvedRequests],
-    )
-
-
-  // --------------------------------------------------------------------------
-  // PAGINATION
-  // --------------------------------------------------------------------------
+  const pendingPayments = useMemo(
+    () =>
+      payments.filter(
+        (payment) => payment.status === 'PENDING',
+      ),
+    [payments],
+  )
 
   const visibleUsers =
-    useMemo(() => {
-      const end =
-        userPage * USERS_PER_PAGE
-
-      return (
-        analytics?.users.slice(
-          0,
-          end,
-        ) ?? []
-      )
-    }, [
-      analytics,
-      userPage,
-    ])
-
+    analytics?.users.slice(
+      0,
+      userPage * USERS_PER_PAGE,
+    ) ?? []
 
   const hasMoreUsers =
-    Boolean(
-      analytics &&
-      visibleUsers.length <
-        analytics.users.length,
-    )
-
-
-  const visibleHistory =
-    useMemo(() => {
-      const end =
-        historyPage *
-        HISTORY_PER_PAGE
-
-      return requests.slice(
-        0,
-        end,
-      )
-    }, [
-      requests,
-      historyPage,
-    ])
-
-
-  const hasMoreHistory =
-    visibleHistory.length <
-    requests.length
-
-
-  // --------------------------------------------------------------------------
-  // ACCESS DENIED
-  // --------------------------------------------------------------------------
+    analytics
+      ? visibleUsers.length < analytics.users.length
+      : false
 
   if (user?.role !== 'ADMIN') {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#05060a] px-6 text-white">
+      <main className="flex min-h-screen items-center justify-center bg-[#030508] px-6 text-white">
+        <div className="relative overflow-hidden rounded-2xl border border-red-400/20 bg-[#080b10] p-8 text-center shadow-[0_0_50px_rgba(239,68,68,0.08)]">
+          <div className="absolute inset-x-0 top-0 h-px bg-red-400/50" />
 
-        <div className="w-full max-w-md rounded-3xl border border-white/[0.08] bg-white/[0.035] p-8 text-center shadow-[0_30px_120px_rgba(0,0,0,0.55)] backdrop-blur-2xl">
+          <p className="font-mono text-[9px] uppercase tracking-[0.25em] text-red-300/60">
+            Access Control
+          </p>
 
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-red-400/10 bg-red-400/[0.06]">
-            <span className="text-xl text-red-300">
-              !
-            </span>
-          </div>
-
-          <h1 className="mt-5 text-2xl font-semibold">
+          <h1 className="mt-3 text-xl font-semibold">
             Access denied
           </h1>
 
-          <p className="mt-2 text-sm leading-6 text-white/40">
-            Administrator access is required to view this dashboard.
+          <p className="mt-2 text-sm text-white/35">
+            Administrator privileges are required.
           </p>
 
           <Link
             to="/dashboard"
-            className="mt-7 inline-flex rounded-xl bg-white px-5 py-3 text-sm font-semibold text-black transition hover:bg-white/90"
+            className="mt-5 inline-flex rounded-lg bg-white px-5 py-2.5 text-xs font-semibold text-black"
           >
             Return to dashboard
           </Link>
-
         </div>
-
       </main>
     )
   }
 
-
-  // --------------------------------------------------------------------------
-  // MAIN DASHBOARD
-  // --------------------------------------------------------------------------
-
   return (
-    <main className="min-h-screen overflow-hidden bg-[#05060a] text-white">
+    <main className="relative min-h-screen overflow-hidden bg-[#030508] text-white">
 
-      {/* ================================================================== */}
-      {/* FUTURISTIC BACKGROUND                                              */}
-      {/* ================================================================== */}
+      {/* Cyber grid */}
+      <div
+        className="pointer-events-none fixed inset-0 opacity-[0.16]"
+        style={{
+          backgroundImage:
+            'linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px)',
+          backgroundSize: '42px 42px',
+        }}
+      />
 
+      {/* Ambient glow */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute left-[20%] top-[-300px] h-[650px] w-[650px] rounded-full bg-cyan-400/[0.035] blur-[160px]" />
 
-        <div className="absolute left-1/2 top-[-300px] h-[650px] w-[650px] -translate-x-1/2 rounded-full bg-violet-500/[0.07] blur-[160px]" />
-
-        <div className="absolute right-[-250px] top-[25%] h-[500px] w-[500px] rounded-full bg-blue-500/[0.05] blur-[150px]" />
-
-        <div className="absolute bottom-[-300px] left-[-200px] h-[550px] w-[550px] rounded-full bg-cyan-500/[0.04] blur-[160px]" />
-
+        <div className="absolute right-[-250px] top-[25%] h-[600px] w-[600px] rounded-full bg-violet-500/[0.035] blur-[160px]" />
       </div>
 
+      {/* Scan line */}
+      <div className="pointer-events-none fixed inset-x-0 top-0 z-50 h-px bg-cyan-300/20 shadow-[0_0_12px_rgba(103,232,249,0.35)]" />
 
-      {/* ================================================================== */}
-      {/* HEADER                                                             */}
-      {/* ================================================================== */}
-
-      <header className="relative z-10 border-b border-white/[0.06] bg-black/20 backdrop-blur-xl">
-
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 sm:py-5">
+      {/* HEADER */}
+      <header className="relative z-10 border-b border-white/[0.06] bg-[#030508]/80 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6">
 
           <Link
             to="/"
             className="flex items-center gap-3"
           >
+            <div className="relative flex h-9 w-9 items-center justify-center rounded-lg border border-cyan-300/20 bg-cyan-300/[0.04] font-mono text-sm font-bold text-cyan-200">
+              K
 
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04]">
-              <span className="font-bold">
-                K
+              <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-cyan-300 shadow-[0_0_8px_rgba(103,232,249,0.9)]" />
+            </div>
+
+            <div>
+              <p className="font-mono text-sm font-semibold tracking-tight">
+                KOTRACK
+              </p>
+
+              <p className="font-mono text-[7px] uppercase tracking-[0.3em] text-cyan-300/40">
+                Control System
+              </p>
+            </div>
+          </Link>
+
+          <div className="flex items-center gap-2">
+            <div className="hidden items-center gap-2 sm:flex">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+
+              <span className="font-mono text-[9px] text-emerald-300/50">
+                ONLINE
               </span>
             </div>
 
-            <div>
-              <p className="text-sm font-semibold">
-                KoTrack
-              </p>
-
-              <p className="text-[9px] uppercase tracking-[0.2em] text-violet-300/50">
-                Command Center
-              </p>
-            </div>
-
-          </Link>
-
-
-          <div className="flex items-center gap-2 sm:gap-3">
-
-            <div className="hidden text-right sm:block">
-              <p className="text-xs text-white/60">
-                {user.name}
-              </p>
-
-              <p className="text-[10px] uppercase tracking-wider text-white/25">
-                Master Admin
-              </p>
-            </div>
+            <span className="hidden text-xs text-white/35 sm:block">
+              {user.name}
+            </span>
 
             <Link
               to="/dashboard"
-              className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-[11px] text-white/60 transition hover:bg-white/[0.06] hover:text-white sm:px-4 sm:text-xs"
+              className="rounded-lg border border-white/[0.08] bg-white/[0.02] px-3 py-2 font-mono text-[9px] text-white/50 transition hover:border-cyan-300/20 hover:text-cyan-200"
             >
-              User Dashboard
+              USER VIEW
             </Link>
-
           </div>
-
         </div>
-
       </header>
 
+      {/* MAIN */}
+      <div className="relative z-10 mx-auto max-w-7xl px-4 py-5 sm:px-6">
 
-      {/* ================================================================== */}
-      {/* CONTENT                                                            */}
-      {/* ================================================================== */}
+        {/* TITLE */}
+        <div className="flex items-end justify-between gap-4">
 
-      <div className="relative z-10 mx-auto max-w-7xl px-4 py-7 sm:px-6 sm:py-10">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[8px] uppercase tracking-[0.25em] text-cyan-300/50">
+                SYS / ADMIN / CORE
+              </span>
 
-        {/* ---------------------------------------------------------------- */}
-        {/* TITLE                                                             */}
-        {/* ---------------------------------------------------------------- */}
-
-        <section>
-
-          <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
-
-            <div>
-
-              <div className="flex items-center gap-2">
-
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.8)]" />
-
-                <p className="text-[9px] uppercase tracking-[0.22em] text-emerald-300/60">
-                  System online
-                </p>
-
-              </div>
-
-              <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-5xl">
-                Admin Command Center
-              </h1>
-
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-white/35">
-                Monitor requests, sessions, users and financial activity from one centralized dashboard.
-              </p>
-
+              <span className="h-px w-8 bg-cyan-300/20" />
             </div>
 
+            <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
+              Command Center
+            </h1>
 
-            <div className="flex gap-2 sm:gap-3">
-
-              <button
-                type="button"
-                onClick={loadDashboard}
-                disabled={
-                  loading ||
-                  analyticsLoading
-                }
-                className="flex-1 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-xs font-medium text-white/60 transition hover:bg-white/[0.06] hover:text-white disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none sm:px-5 sm:text-sm"
-              >
-                {loading ||
-                analyticsLoading
-                  ? 'Refreshing...'
-                  : 'Refresh'}
-              </button>
-
-              <Link
-                to="/admin/sessions/create"
-                className="flex-1 inline-flex items-center justify-center rounded-xl bg-white px-4 py-3 text-xs font-semibold text-black transition hover:bg-white/90 sm:flex-none sm:px-5 sm:text-sm"
-              >
-                + Session
-              </Link>
-
-            </div>
-
+            <p className="mt-1 font-mono text-[9px] text-white/25">
+              REAL-TIME SYSTEM OPERATIONS
+            </p>
           </div>
 
-        </section>
-
-
-        {/* ---------------------------------------------------------------- */}
-        {/* ERROR                                                             */}
-        {/* ---------------------------------------------------------------- */}
-
-        {error && (
-          <div
-            role="alert"
-            className="mt-6 rounded-2xl border border-red-400/10 bg-red-400/[0.05] px-5 py-4 text-sm text-red-300"
+          <button
+            type="button"
+            onClick={loadDashboard}
+            disabled={refreshing}
+            className="rounded-lg border border-cyan-300/10 bg-cyan-300/[0.025] px-3 py-2 font-mono text-[9px] text-cyan-200/60 transition hover:border-cyan-300/25 hover:bg-cyan-300/[0.05] disabled:opacity-40"
           >
-            {error}
+            {refreshing ? 'SYNCING...' : '↻ REFRESH'}
+          </button>
+        </div>
+
+        {/* Error */}
+        {error && (
+          <div className="mt-3 rounded-xl border border-red-400/15 bg-red-400/[0.04] px-4 py-2.5 font-mono text-[9px] text-red-300">
+            ERROR // {error}
           </div>
         )}
 
+        {/* ============================================================ */}
+        {/* TOP ANALYTICS                                                */}
+        {/* ============================================================ */}
 
-        {/* ================================================================= */}
-        {/* TOP STATISTICS                                                     */}
-        {/* ================================================================= */}
+        <section className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
 
-        <section className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
-
-          <StatCard
-            label="Users"
+          <CyberStat
+            label="USERS"
             value={
-              analyticsLoading
+              loading
                 ? '—'
                 : String(
-                    analytics?.summary.total_users ??
-                    0,
+                    analytics?.summary.total_users ?? 0,
                   )
             }
-            description="Active accounts"
           />
 
-          <StatCard
-            label="Sessions"
+          <CyberStat
+            label="SESSIONS"
             value={
-              analyticsLoading
+              loading
                 ? '—'
                 : String(
-                    analytics?.summary.total_sessions ??
-                    0,
+                    analytics?.summary.total_sessions ?? 0,
                   )
             }
-            description="Recorded sessions"
           />
 
-          <StatCard
-            label="Pending"
+          <CyberStat
+            label="PACKETS"
             value={
-              analyticsLoading
+              loading
                 ? '—'
                 : String(
-                    analytics?.summary.pending_session_requests ??
-                    pendingRequests.length,
+                    analytics?.summary.total_packets ?? 0,
                   )
             }
-            description="Session requests"
           />
 
-          <StatCard
-            label="Payments"
+          <CyberStat
+            label="VALUE"
             value={
-              analyticsLoading
+              loading
                 ? '—'
-                : String(
-                    analytics?.summary.pending_payments ??
-                    0,
+                : formatRM(
+                    analytics?.summary.total_session_value ?? 0,
                   )
             }
-            description="Pending payments"
           />
 
-          <StatCard
-            label="Packets"
+          <CyberStat
+            label="COLLECTED"
             value={
-              analyticsLoading
+              loading
                 ? '—'
-                : String(
-                    analytics?.summary.total_packets ??
-                    0,
+                : formatRM(
+                    analytics?.summary.total_confirmed_payments ?? 0,
                   )
             }
-            description="Consumed"
+            positive
           />
 
-          <StatCard
-            label="Collection"
+          <CyberStat
+            label="OUTSTANDING"
             value={
-              analyticsLoading
+              loading
                 ? '—'
-                : `${(
-                    calculateCollectionRate(
-                      analytics?.summary.total_confirmed_payments ??
-                      0,
-                      analytics?.summary.total_session_value ??
-                      0,
-                    )
-                  ).toFixed(1)}%`
+                : formatRM(
+                    analytics?.summary.total_outstanding ?? 0,
+                  )
             }
-            description="Collection rate"
+            danger
           />
 
         </section>
 
+        {/* ============================================================ */}
+        {/* FINANCIAL + DEBT                                             */}
+        {/* ============================================================ */}
 
-        {/* ================================================================= */}
-        {/* FINANCIAL OVERVIEW                                                 */}
-        {/* ================================================================= */}
+        <div className="mt-3 grid gap-3 lg:grid-cols-3">
 
-        <section className="mt-5 grid gap-5 lg:grid-cols-3">
+          <section className="cyber-panel lg:col-span-2">
+            <PanelHeader
+              code="FIN-01"
+              title="Financial Overview"
+              subtitle="SYSTEM-WIDE FINANCIAL STATE"
+            />
 
-          <AnalyticsCard
-            title="Financial Overview"
-            eyebrow="Live analytics"
-            className="lg:col-span-2"
-          >
-
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="mt-3 grid grid-cols-3 gap-2">
 
               <Metric
-                label="Total owed"
-                value={
-                  analyticsLoading
-                    ? 'RM —'
-                    : formatRM(
-                        analytics?.summary.total_session_value ??
-                        0,
-                      )
-                }
-                description="Total session value"
+                label="SESSION VALUE"
+                value={formatRM(
+                  analytics?.summary.total_session_value ?? 0,
+                )}
               />
 
               <Metric
-                label="Collected"
-                value={
-                  analyticsLoading
-                    ? 'RM —'
-                    : formatRM(
-                        analytics?.summary.total_confirmed_payments ??
-                        0,
-                      )
-                }
-                description="Confirmed payments"
+                label="COLLECTED"
+                value={formatRM(
+                  analytics?.summary.total_confirmed_payments ?? 0,
+                )}
+                positive
               />
 
               <Metric
-                label="Outstanding"
-                value={
-                  analyticsLoading
-                    ? 'RM —'
-                    : formatRM(
-                        analytics?.summary.total_outstanding ??
-                        0,
-                      )
-                }
-                description="Remaining debt"
-                highlight
+                label="OUTSTANDING"
+                value={formatRM(
+                  analytics?.summary.total_outstanding ?? 0,
+                )}
+                danger
               />
 
             </div>
 
+            <div className="mt-3">
+              <div className="flex justify-between font-mono text-[8px] text-white/25">
+                <span>COLLECTION_RATIO</span>
 
-            <div className="mt-5 rounded-2xl border border-white/[0.06] bg-black/20 p-4 sm:p-5">
-
-              <div className="flex items-center justify-between">
-
-                <div>
-                  <p className="text-xs font-medium text-white/60">
-                    Collection progress
-                  </p>
-
-                  <p className="mt-1 text-[10px] text-white/25">
-                    Confirmed payments versus session value
-                  </p>
-                </div>
-
-                <span className="text-sm font-semibold text-emerald-300">
-                  {analyticsLoading
-                    ? '—'
-                    : `${(
-                        calculateCollectionRate(
-                          analytics?.summary.total_confirmed_payments ??
-                          0,
-                          analytics?.summary.total_session_value ??
-                          0,
-                        )
-                      ).toFixed(1)}%`}
+                <span>
+                  {collectionRate(
+                    analytics?.summary.total_confirmed_payments ?? 0,
+                    analytics?.summary.total_session_value ?? 0,
+                  ).toFixed(1)}
+                  %
                 </span>
-
               </div>
 
-
-              <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-white/[0.05]">
-
+              <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-white/[0.04]">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-violet-400 via-blue-400 to-emerald-400 transition-all duration-700"
+                  className="h-full rounded-full bg-gradient-to-r from-cyan-400 via-blue-400 to-violet-400 shadow-[0_0_10px_rgba(103,232,249,0.5)]"
                   style={{
-                    width: `${
-                      Math.min(
-                        calculateCollectionRate(
-                          analytics?.summary.total_confirmed_payments ??
-                          0,
-                          analytics?.summary.total_session_value ??
-                          0,
-                        ),
-                        100,
-                      )
-                    }%`,
+                    width: `${Math.min(
+                      collectionRate(
+                        analytics?.summary.total_confirmed_payments ?? 0,
+                        analytics?.summary.total_session_value ?? 0,
+                      ),
+                      100,
+                    )}%`,
                   }}
                 />
-
               </div>
-
             </div>
-
-
-            <div className="mt-3 grid grid-cols-2 gap-3">
-
-              <MiniMetric
-                label="Requested packets"
-                value={totalRequestedPackets.toFixed(2)}
-              />
-
-              <MiniMetric
-                label="Approved packets"
-                value={approvedPackets.toFixed(2)}
-              />
-
-            </div>
-
-          </AnalyticsCard>
-
-
-          {/* ---------------------------------------------------------------- */}
-          {/* DEBT MONITOR                                                     */}
-          {/* ---------------------------------------------------------------- */}
-
-          <AnalyticsCard
-            title="Debt Monitor"
-            eyebrow="Highest outstanding"
-          >
-
-            {analyticsLoading ? (
-              <LoadingBox text="Loading debt data..." />
-            ) : analytics?.highest_debt_users.length === 0 ? (
-              <EmptyBox
-                title="No debt recorded"
-                description="Users with outstanding balances will appear here."
-              />
-            ) : (
-              <div className="space-y-2.5">
-
-                {analytics?.highest_debt_users.map(
-                  (person, index) => (
-                    <DebtRankingRow
-                      key={person.user_id}
-                      person={person}
-                      rank={index + 1}
-                    />
-                  ),
-                )}
-
-              </div>
-            )}
-
-          </AnalyticsCard>
-
-        </section>
-
-
-        {/* ================================================================= */}
-        {/* INDIVIDUAL DEBT LEDGER                                             */}
-        {/* ================================================================= */}
-
-        <section className="mt-5 rounded-3xl border border-white/[0.08] bg-white/[0.025] p-4 shadow-[0_25px_100px_rgba(0,0,0,0.25)] backdrop-blur-xl sm:p-6">
-
-          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
-
-            <div>
-
-              <p className="text-[9px] uppercase tracking-[0.18em] text-white/25">
-                Financial intelligence
-              </p>
-
-              <h2 className="mt-2 text-xl font-semibold">
-                Individual debt ledger
-              </h2>
-
-              <p className="mt-1 text-xs text-white/30">
-                Every active user's debt, confirmed payments and remaining balance.
-              </p>
-
-            </div>
-
-            <span className="w-fit rounded-full border border-violet-400/10 bg-violet-400/[0.05] px-3 py-1.5 text-[9px] uppercase tracking-wider text-violet-300/70">
-              Live database
-            </span>
-
-          </div>
-
-
-          {analyticsLoading ? (
-            <div className="mt-5">
-              <LoadingBox text="Loading user balances..." />
-            </div>
-          ) : analytics?.users.length === 0 ? (
-            <div className="mt-5">
-              <EmptyBox
-                title="No users found"
-                description="Active users will appear here."
-              />
-            </div>
-          ) : (
-
-            <>
-
-              {/* MOBILE CARDS */}
-
-              <div className="mt-5 space-y-2.5 md:hidden">
-
-                {visibleUsers.map(
-                  (person) => (
-                    <MobileDebtCard
-                      key={person.user_id}
-                      person={person}
-                    />
-                  ),
-                )}
-
-              </div>
-
-
-              {/* DESKTOP TABLE */}
-
-              <div className="mt-5 hidden overflow-x-auto md:block">
-
-                <table className="w-full">
-
-                  <thead>
-
-                    <tr className="border-b border-white/[0.06] text-left">
-
-                      <th className="px-4 py-3 text-[10px] uppercase tracking-wider text-white/25">
-                        User
-                      </th>
-
-                      <th className="px-4 py-3 text-right text-[10px] uppercase tracking-wider text-white/25">
-                        Owed
-                      </th>
-
-                      <th className="px-4 py-3 text-right text-[10px] uppercase tracking-wider text-white/25">
-                        Paid
-                      </th>
-
-                      <th className="px-4 py-3 text-right text-[10px] uppercase tracking-wider text-white/25">
-                        Outstanding
-                      </th>
-
-                    </tr>
-
-                  </thead>
-
-
-                  <tbody>
-
-                    {visibleUsers.map(
-                      (person) => (
-                        <DebtTableRow
-                          key={person.user_id}
-                          person={person}
-                        />
-                      ),
-                    )}
-
-                  </tbody>
-
-                </table>
-
-              </div>
-
-
-              {hasMoreUsers && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setUserPage(
-                      (page) =>
-                        page + 1,
-                    )
-                  }
-                  className="mt-4 w-full rounded-xl border border-white/[0.08] bg-white/[0.03] py-3 text-xs font-medium text-white/50 transition hover:bg-white/[0.06] hover:text-white"
-                >
-                  Load more users
-                </button>
-              )}
-
-              {!hasMoreUsers &&
-                analytics &&
-                analytics.users.length >
-                  USERS_PER_PAGE && (
-                  <p className="mt-4 text-center text-[10px] text-white/20">
-                    All {analytics.users.length} users shown
-                  </p>
-              )}
-
-            </>
-
-          )}
-
-        </section>
-
-
-        {/* ================================================================= */}
-        {/* SPENDING RANKING                                                   */}
-        {/* ================================================================= */}
-
-        <section className="mt-5 rounded-3xl border border-white/[0.08] bg-white/[0.025] p-4 backdrop-blur-xl sm:p-6">
-
-          <div>
-
-            <p className="text-[9px] uppercase tracking-[0.18em] text-white/25">
-              Usage intelligence
-            </p>
-
-            <h2 className="mt-2 text-xl font-semibold">
-              Highest spending users
-            </h2>
-
-            <p className="mt-1 text-xs text-white/30">
-              Users with the highest accumulated session costs.
-            </p>
-
-          </div>
-
-
-          {analyticsLoading ? (
-            <div className="mt-5">
-              <LoadingBox text="Loading spending data..." />
-            </div>
-          ) : analytics?.highest_spenders.length === 0 ? (
-            <div className="mt-5">
-              <EmptyBox
-                title="No spending data"
-                description="Session participation will appear here."
-              />
-            </div>
-          ) : (
-
-            <div className="mt-5 grid gap-2.5 sm:grid-cols-2 xl:grid-cols-5">
-
-              {analytics?.highest_spenders.map(
-                (person, index) => (
-                  <SpenderCard
+          </section>
+
+          <section className="cyber-panel">
+            <PanelHeader
+              code="DEBT-01"
+              title="Debt Monitor"
+              subtitle="HIGHEST OUTSTANDING BALANCES"
+            />
+
+            <div className="mt-3 space-y-1.5">
+              {analytics?.highest_debt_users
+                .slice(0, 5)
+                .map((person, index) => (
+                  <div
                     key={person.user_id}
-                    person={person}
-                    rank={index + 1}
-                  />
-                ),
-              )}
+                    className="flex items-center gap-2 rounded-lg border border-white/[0.05] bg-black/20 px-2.5 py-2"
+                  >
+                    <span className="font-mono text-[8px] text-cyan-300/40">
+                      0{index + 1}
+                    </span>
 
+                    <span className="min-w-0 flex-1 truncate text-[9px] text-white/55">
+                      {person.name}
+                    </span>
+
+                    <span className="font-mono text-[9px] font-semibold text-red-300/80">
+                      {formatRM(person.balance)}
+                    </span>
+                  </div>
+                ))}
             </div>
+          </section>
 
-          )}
+        </div>
 
-        </section>
+        {/* ============================================================ */}
+        {/* PENDING OPERATIONS                                           */}
+        {/* ============================================================ */}
 
+        <div className="mt-3 grid gap-3 lg:grid-cols-2">
 
-        {/* ================================================================= */}
-        {/* PENDING PAYMENTS                                                   */}
-        {/* ================================================================= */}
+          {/* PAYMENTS */}
+          <section className="cyber-panel">
+            <PanelHeader
+              code="PAY-01"
+              title="Pending Payments"
+              subtitle="TRANSACTION REVIEW QUEUE"
+              count={pendingPayments.length}
+            />
 
-        <section className="mt-5 rounded-3xl border border-white/[0.08] bg-white/[0.025] p-4 shadow-[0_25px_100px_rgba(0,0,0,0.25)] backdrop-blur-xl sm:p-6">
-          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-            <div>
-              <p className="text-[9px] uppercase tracking-[0.18em] text-white/25">
-                Finance operations
-              </p>
+            <div className="mt-3 space-y-2">
 
-              <h2 className="mt-2 text-xl font-semibold">
-                Pending payment approvals
-              </h2>
+              {pendingPayments.length === 0 ? (
+                <Empty text="NO PENDING PAYMENT OPERATIONS" />
+              ) : (
+                pendingPayments.map((payment) => {
 
-              <p className="mt-1 text-xs text-white/30">
-                Review user-submitted payments before they affect balances.
-              </p>
-            </div>
-
-            <span className="w-fit rounded-full border border-blue-400/10 bg-blue-400/[0.05] px-3 py-1.5 text-[9px] uppercase tracking-wider text-blue-300/70">
-              {pendingPayments.length} pending
-            </span>
-          </div>
-
-          {paymentsLoading ? (
-            <div className="mt-5">
-              <LoadingBox text="Loading payments..." />
-            </div>
-          ) : pendingPayments.length === 0 ? (
-            <div className="mt-5">
-              <EmptyBox
-                title="No pending payments"
-                description="New user payment submissions will appear here."
-              />
-            </div>
-          ) : (
-            <div className="mt-5 space-y-3">
-              {pendingPayments.map((payment) => (
-                <PaymentCard
-                  key={payment.id}
-                  payment={payment}
-                  userName={
+                  const userName =
                     analytics?.users.find(
                       (person) =>
                         person.user_id === payment.user_id,
-                    )?.name ?? `User #${payment.user_id}`
-                  }
-                  processing={
-                    paymentProcessingId === payment.id
-                  }
-                  onConfirm={() =>
-                    handlePaymentAction(
-                      payment.id,
-                      'confirm',
-                    )
-                  }
-                  onReject={() =>
-                    handlePaymentAction(
-                      payment.id,
-                      'reject',
-                    )
-                  }
-                />
-              ))}
-            </div>
-          )}
-        </section>
+                    )?.name ??
+                    `USER #${payment.user_id}`
 
+                  return (
+                    <div
+                      key={payment.id}
+                      className="rounded-xl border border-white/[0.06] bg-black/20 p-3 transition hover:border-cyan-300/10"
+                    >
+                      <div className="flex items-center justify-between gap-3">
 
-        {/* ================================================================= */}
-        {/* PENDING REQUESTS                                                   */}
-        {/* ================================================================= */}
+                        <div>
+                          <p className="text-[10px] font-medium text-white/65">
+                            {userName}
+                          </p>
 
-        <section className="mt-5 rounded-3xl border border-white/[0.08] bg-white/[0.025] p-4 shadow-[0_25px_100px_rgba(0,0,0,0.25)] backdrop-blur-xl sm:p-6">
+                          <p className="mt-0.5 font-mono text-[8px] text-white/20">
+                            TX-{String(payment.id).padStart(4, '0')}
+                          </p>
+                        </div>
 
-          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+                        <span className="font-mono text-sm font-semibold text-cyan-200/80">
+                          {formatRM(
+                            Number(payment.amount),
+                          )}
+                        </span>
 
-            <div>
+                      </div>
 
-              <p className="text-[9px] uppercase tracking-[0.18em] text-white/25">
-                Operations
-              </p>
+                      <div className="mt-2 flex gap-2">
 
-              <h2 className="mt-2 text-xl font-semibold">
-                Pending session requests
-              </h2>
+                        <button
+                          type="button"
+                          disabled={
+                            paymentProcessingId ===
+                            payment.id
+                          }
+                          onClick={() =>
+                            handlePaymentAction(
+                              payment.id,
+                              'reject',
+                            )
+                          }
+                          className="flex-1 rounded-lg border border-red-400/10 bg-red-400/[0.03] py-2 font-mono text-[8px] text-red-300/70 transition hover:bg-red-400/[0.07]"
+                        >
+                          REJECT
+                        </button>
 
-              <p className="mt-1 text-xs text-white/30">
-                Review and approve requests submitted by users.
-              </p>
+                        <button
+                          type="button"
+                          disabled={
+                            paymentProcessingId ===
+                            payment.id
+                          }
+                          onClick={() =>
+                            handlePaymentAction(
+                              payment.id,
+                              'confirm',
+                            )
+                          }
+                          className="flex-1 rounded-lg border border-emerald-400/15 bg-emerald-400/[0.04] py-2 font-mono text-[8px] text-emerald-300/80 transition hover:bg-emerald-400/[0.08]"
+                        >
+                          CONFIRM
+                        </button>
 
-            </div>
-
-            <span className="w-fit rounded-full border border-yellow-400/10 bg-yellow-400/[0.05] px-3 py-1.5 text-[9px] uppercase tracking-wider text-yellow-300/70">
-              {pendingRequests.length} pending
-            </span>
-
-          </div>
-
-
-          {loading ? (
-            <LoadingBox text="Loading requests..." />
-          ) : pendingRequests.length === 0 ? (
-            <EmptyBox
-              title="No pending requests"
-              description="New user requests will appear here."
-            />
-          ) : (
-
-            <div className="mt-5 space-y-3">
-
-              {pendingRequests.map(
-                (request) => (
-                  <RequestCard
-                    key={request.id}
-                    request={request}
-                    processing={
-                      processingId ===
-                      request.id
-                    }
-                    onApprove={
-                      handleApprove
-                    }
-                    onReject={
-                      handleReject
-                    }
-                  />
-                ),
+                      </div>
+                    </div>
+                  )
+                })
               )}
 
             </div>
+          </section>
 
+          {/* SESSIONS */}
+          <section className="cyber-panel">
+            <PanelHeader
+              code="SES-01"
+              title="Pending Sessions"
+              subtitle="SESSION APPROVAL QUEUE"
+              count={pendingRequests.length}
+            />
+
+            <div className="mt-3 space-y-2">
+
+              {pendingRequests.length === 0 ? (
+                <Empty text="NO PENDING SESSION OPERATIONS" />
+              ) : (
+                pendingRequests.map((request) => (
+                  <div
+                    key={request.id}
+                    className="rounded-xl border border-white/[0.06] bg-black/20 p-3 transition hover:border-cyan-300/10"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+
+                      <div>
+                        <p className="font-mono text-[9px] text-white/55">
+                          SESSION-
+                          {String(request.id).padStart(
+                            4,
+                            '0',
+                          )}
+                        </p>
+
+                        <p className="mt-0.5 text-[8px] text-white/20">
+                          USER #{request.requested_by}
+                          {' · '}
+                          {formatDate(
+                            request.session_date,
+                          )}
+                        </p>
+                      </div>
+
+                      <span className="font-mono text-[9px] text-violet-300/60">
+                        {request.packets_used} PKT
+                      </span>
+
+                    </div>
+
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {request.participants.map(
+                        (participant) => (
+                          <span
+                            key={`${request.id}-${participant.user_id}`}
+                            className="rounded-md border border-white/[0.05] bg-white/[0.02] px-2 py-1 text-[8px] text-white/35"
+                          >
+                            {participant.user_name}
+                          </span>
+                        ),
+                      )}
+                    </div>
+
+                    <div className="mt-2 flex gap-2">
+
+                      <button
+                        type="button"
+                        disabled={
+                          processingId === request.id
+                        }
+                        onClick={() =>
+                          handleSessionAction(
+                            request.id,
+                            'reject',
+                          )
+                        }
+                        className="flex-1 rounded-lg border border-red-400/10 bg-red-400/[0.03] py-2 font-mono text-[8px] text-red-300/70 transition hover:bg-red-400/[0.07]"
+                      >
+                        REJECT
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={
+                          processingId === request.id
+                        }
+                        onClick={() =>
+                          handleSessionAction(
+                            request.id,
+                            'approve',
+                          )
+                        }
+                        className="flex-1 rounded-lg border border-emerald-400/15 bg-emerald-400/[0.04] py-2 font-mono text-[8px] text-emerald-300/80 transition hover:bg-emerald-400/[0.08]"
+                      >
+                        APPROVE
+                      </button>
+
+                    </div>
+                  </div>
+                ))
+              )}
+
+            </div>
+          </section>
+
+        </div>
+
+        {/* ============================================================ */}
+        {/* USER BALANCES                                                */}
+        {/* ============================================================ */}
+
+        <section className="cyber-panel mt-3">
+
+          <PanelHeader
+            code="USR-01"
+            title="User Balances"
+            subtitle="INDIVIDUAL FINANCIAL POSITION"
+            count={analytics?.users.length ?? 0}
+          />
+
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[520px]">
+
+              <thead>
+                <tr className="border-b border-cyan-300/[0.07]">
+                  <th className="px-2 py-2 text-left font-mono text-[7px] uppercase tracking-wider text-white/20">
+                    Identity
+                  </th>
+
+                  <th className="px-2 py-2 text-right font-mono text-[7px] uppercase tracking-wider text-white/20">
+                    Owed
+                  </th>
+
+                  <th className="px-2 py-2 text-right font-mono text-[7px] uppercase tracking-wider text-white/20">
+                    Paid
+                  </th>
+
+                  <th className="px-2 py-2 text-right font-mono text-[7px] uppercase tracking-wider text-white/20">
+                    Balance
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody>
+
+                {visibleUsers.map((person) => (
+                  <tr
+                    key={person.user_id}
+                    className="border-b border-white/[0.025] transition hover:bg-cyan-300/[0.015]"
+                  >
+                    <td className="px-2 py-2">
+
+                      <div className="flex items-center gap-2">
+
+                        <div className="flex h-6 w-6 items-center justify-center rounded-md border border-white/[0.06] bg-white/[0.025] font-mono text-[8px] text-cyan-300/50">
+                          {person.name
+                            .charAt(0)
+                            .toUpperCase()}
+                        </div>
+
+                        <div>
+                          <p className="text-[9px] text-white/60">
+                            {person.name}
+                          </p>
+
+                          <p className="font-mono text-[7px] text-white/15">
+                            UID-{person.user_id}
+                          </p>
+                        </div>
+
+                      </div>
+
+                    </td>
+
+                    <td className="px-2 py-2 text-right font-mono text-[9px] text-white/40">
+                      {formatRM(person.total_owed)}
+                    </td>
+
+                    <td className="px-2 py-2 text-right font-mono text-[9px] text-emerald-300/60">
+                      {formatRM(person.total_paid)}
+                    </td>
+
+                    <td className="px-2 py-2 text-right">
+
+                      <span
+                        className={
+                          person.balance > 0
+                            ? 'font-mono text-[9px] font-semibold text-red-300'
+                            : 'font-mono text-[9px] font-semibold text-emerald-300'
+                        }
+                      >
+                        {formatRM(person.balance)}
+                      </span>
+
+                    </td>
+                  </tr>
+                ))}
+
+              </tbody>
+            </table>
+          </div>
+
+          {hasMoreUsers && (
+            <button
+              type="button"
+              onClick={() =>
+                setUserPage((page) => page + 1)
+              }
+              className="mt-2 w-full rounded-lg border border-white/[0.06] bg-white/[0.015] py-2 font-mono text-[8px] text-cyan-200/40 transition hover:border-cyan-300/15 hover:text-cyan-200/70"
+            >
+              LOAD NEXT USER BLOCK
+            </button>
           )}
 
         </section>
 
+        {/* ============================================================ */}
+        {/* HIGHEST SPENDING                                             */}
+        {/* ============================================================ */}
 
-        {/* ================================================================= */}
-        {/* REQUEST HISTORY                                                    */}
-        {/* ================================================================= */}
+        <section className="cyber-panel mt-3">
 
-        <section className="mt-5 rounded-3xl border border-white/[0.08] bg-white/[0.025] p-4 backdrop-blur-xl sm:p-6">
+          <PanelHeader
+            code="FIN-02"
+            title="Highest Spending"
+            subtitle="TOP USERS BY ACCUMULATED SESSION COST"
+          />
 
-          <div>
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
 
-            <p className="text-[9px] uppercase tracking-[0.18em] text-white/25">
-              Audit trail
-            </p>
+            {analytics?.highest_spenders
+              .slice(0, 5)
+              .map((person, index) => (
+                <div
+                  key={person.user_id}
+                  className="relative overflow-hidden rounded-xl border border-white/[0.05] bg-black/20 p-3"
+                >
+                  <div className="absolute right-0 top-0 h-12 w-12 rounded-full bg-violet-400/[0.04] blur-xl" />
 
-            <h2 className="mt-2 text-xl font-semibold">
-              Recent requests
-            </h2>
+                  <p className="font-mono text-[8px] text-violet-300/45">
+                    RANK_0{index + 1}
+                  </p>
 
-            <p className="mt-1 text-xs text-white/30">
-              Recent activity across the session request system.
-            </p>
+                  <p className="mt-1 truncate text-[9px] text-white/55">
+                    {person.name}
+                  </p>
+
+                  <p className="mt-1 font-mono text-sm font-semibold text-white/75">
+                    {formatRM(person.total_spent)}
+                  </p>
+                </div>
+              ))}
 
           </div>
 
+        </section>
 
-          {loading ? (
-            <div className="mt-5">
-              <LoadingBox text="Loading history..." />
-            </div>
-          ) : requests.length === 0 ? (
-            <div className="mt-5">
-              <EmptyBox
-                title="No requests yet"
-                description="Session request history will appear here."
-              />
-            </div>
-          ) : (
+        {/* ============================================================ */}
+        {/* PASSWORD RESET — BOTTOM                                     */}
+        {/* ============================================================ */}
 
-            <>
+        <section className="cyber-panel mt-6 border-violet-400/[0.10]">
 
-              <div className="mt-5 space-y-2.5">
+          <PanelHeader
+            code="SEC-01"
+            title="Password Reset Requests"
+            subtitle="ADMIN-ASSISTED ACCOUNT RECOVERY"
+            count={resetRequests.length}
+          />
 
-                {visibleHistory.map(
-                  (request) => (
-                    <HistoryRow
-                      key={request.id}
-                      request={request}
-                    />
-                  ),
-                )}
+          {resetCode && (
+            <div className="mt-3 rounded-xl border border-emerald-400/15 bg-emerald-400/[0.025] p-3">
+
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+
+                <div>
+                  <p className="font-mono text-[8px] uppercase tracking-[0.18em] text-emerald-300/50">
+                    GENERATED CREDENTIAL
+                  </p>
+
+                  <p className="mt-1 text-[10px] text-white/60">
+                    Give this code to{' '}
+                    <span className="font-semibold text-white/85">
+                      {resetCode.username}
+                    </span>
+                  </p>
+
+                  <p className="mt-1 font-mono text-[7px] text-white/20">
+                    EXPIRES{' '}
+                    {formatDateTime(
+                      resetCode.expires_at,
+                    )}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+
+                  <span className="rounded-lg border border-emerald-300/20 bg-black/30 px-4 py-2 font-mono text-xl font-bold tracking-[0.3em] text-emerald-300 shadow-[0_0_20px_rgba(52,211,153,0.08)]">
+                    {resetCode.code}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      navigator.clipboard.writeText(
+                        resetCode.code,
+                      )
+                    }
+                    className="rounded-lg border border-white/[0.07] px-3 py-2 font-mono text-[8px] text-white/35 transition hover:border-cyan-300/20 hover:text-cyan-200"
+                  >
+                    COPY
+                  </button>
+
+                </div>
 
               </div>
+            </div>
+          )}
 
+          {resetRequests.length === 0 ? (
+            <div className="mt-3">
+              <Empty text="NO PASSWORD RESET REQUESTS" />
+            </div>
+          ) : (
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
 
-              {hasMoreHistory && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setHistoryPage(
-                      (page) =>
-                        page + 1,
-                    )
-                  }
-                  className="mt-4 w-full rounded-xl border border-white/[0.08] bg-white/[0.03] py-3 text-xs font-medium text-white/50 transition hover:bg-white/[0.06] hover:text-white"
+              {resetRequests.map((request) => (
+                <div
+                  key={request.id}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.06] bg-black/20 p-3"
                 >
-                  Load more history
-                </button>
-              )}
 
-            </>
+                  <div className="min-w-0">
 
+                    <p className="truncate text-[10px] font-medium text-white/65">
+                      {request.username}
+                    </p>
+
+                    <p className="mt-0.5 font-mono text-[7px] text-white/20">
+                      RESET-
+                      {String(request.id).padStart(
+                        4,
+                        '0',
+                      )}
+                      {' · '}
+                      {formatDateTime(
+                        request.created_at,
+                      )}
+                    </p>
+
+                  </div>
+
+                  {request.approved_at ? (
+                    <span className="shrink-0 rounded-full border border-emerald-400/10 bg-emerald-400/[0.04] px-2 py-1 font-mono text-[7px] text-emerald-300/60">
+                      APPROVED
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={
+                        resetProcessingId ===
+                        request.id
+                      }
+                      onClick={() =>
+                        handleResetApproval(
+                          request.id,
+                        )
+                      }
+                      className="shrink-0 rounded-lg border border-violet-400/15 bg-violet-400/[0.04] px-3 py-2 font-mono text-[8px] text-violet-200/70 transition hover:border-violet-300/30 hover:bg-violet-400/[0.08] disabled:opacity-40"
+                    >
+                      {resetProcessingId ===
+                      request.id
+                        ? 'GENERATING...'
+                        : 'APPROVE'}
+                    </button>
+                  )}
+
+                </div>
+              ))}
+
+            </div>
           )}
 
         </section>
 
-
-        {/* ================================================================= */}
-        {/* CAPABILITIES                                                       */}
-        {/* ================================================================= */}
-
-        <section className="mt-5 grid gap-3 sm:grid-cols-3">
-
-          <Capability
-            title="Session control"
-            description="Create and approve sessions."
-          />
-
-          <Capability
-            title="Financial analytics"
-            description="Track payments and individual debt."
-          />
-
-          <Capability
-            title="User oversight"
-            description="Review users and activity."
-          />
-
-        </section>
-
-
-        <p className="mt-8 pb-4 text-center text-[9px] uppercase tracking-[0.18em] text-white/15">
-          KoTrack Administration System
-        </p>
+        {/* Footer */}
+        <div className="flex items-center justify-between py-5 font-mono text-[7px] uppercase tracking-[0.2em] text-white/[0.12]">
+          <span>KOTRACK // ADMIN CORE</span>
+          <span>SECURE SESSION</span>
+        </div>
 
       </div>
-
     </main>
   )
 }
 
+/* ========================================================================== */
+/* COMPONENTS                                                                 */
+/* ========================================================================== */
 
-// ============================================================================
-// COMPONENTS
-// ============================================================================
-
-function StatCard({
+function CyberStat({
   label,
   value,
-  description,
+  positive = false,
+  danger = false,
 }: {
   label: string
   value: string
-  description: string
+  positive?: boolean
+  danger?: boolean
 }) {
   return (
-    <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4 transition hover:border-white/[0.14] hover:bg-white/[0.04] sm:p-5">
+    <div className="group relative overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.02] p-3 transition hover:border-cyan-300/15 hover:bg-cyan-300/[0.015]">
 
-      <div className="flex items-center justify-between">
+      <div className="absolute left-0 top-0 h-px w-8 bg-cyan-300/30 transition-all group-hover:w-full" />
 
-        <p className="text-[9px] uppercase tracking-[0.16em] text-white/30">
-          {label}
-        </p>
-
-        <span className="h-1.5 w-1.5 rounded-full bg-violet-300 shadow-[0_0_12px_rgba(196,181,253,0.7)]" />
-
-      </div>
-
-      <p className="mt-4 text-2xl font-semibold tracking-tight sm:text-3xl">
-        {value}
-      </p>
-
-      <p className="mt-1.5 text-[10px] text-white/25">
-        {description}
-      </p>
-
-    </div>
-  )
-}
-
-
-function AnalyticsCard({
-  title,
-  eyebrow,
-  children,
-  className = '',
-}: {
-  title: string
-  eyebrow: string
-  children: React.ReactNode
-  className?: string
-}) {
-  return (
-    <div
-      className={`rounded-3xl border border-white/[0.08] bg-white/[0.025] p-4 backdrop-blur-xl sm:p-6 ${className}`}
-    >
-
-      <p className="text-[9px] uppercase tracking-[0.18em] text-violet-300/40">
-        {eyebrow}
-      </p>
-
-      <h2 className="mt-2 text-lg font-semibold">
-        {title}
-      </h2>
-
-      <div className="mt-4">
-        {children}
-      </div>
-
-    </div>
-  )
-}
-
-
-function Metric({
-  label,
-  value,
-  description,
-  highlight = false,
-}: {
-  label: string
-  value: string
-  description: string
-  highlight?: boolean
-}) {
-  return (
-    <div
-      className={`rounded-2xl border p-4 ${
-        highlight
-          ? 'border-red-400/10 bg-red-400/[0.04]'
-          : 'border-white/[0.06] bg-black/15'
-      }`}
-    >
-
-      <p className="text-[9px] uppercase tracking-wider text-white/25">
+      <p className="font-mono text-[7px] uppercase tracking-[0.18em] text-white/25">
         {label}
       </p>
 
       <p
-        className={`mt-2 text-xl font-semibold ${
-          highlight
-            ? 'text-red-300'
-            : 'text-white'
+        className={`mt-1 font-mono text-sm font-semibold ${
+          danger
+            ? 'text-red-300/85'
+            : positive
+              ? 'text-emerald-300/80'
+              : 'text-white/75'
         }`}
       >
         {value}
       </p>
 
-      <p className="mt-1 text-[10px] text-white/20">
-        {description}
-      </p>
-
     </div>
   )
 }
 
-
-function MiniMetric({
-  label,
-  value,
+function PanelHeader({
+  code,
+  title,
+  subtitle,
+  count,
 }: {
-  label: string
-  value: string
+  code: string
+  title: string
+  subtitle: string
+  count?: number
 }) {
   return (
-    <div className="rounded-2xl border border-white/[0.05] bg-white/[0.02] p-3.5">
-
-      <p className="text-[9px] uppercase tracking-wider text-white/20">
-        {label}
-      </p>
-
-      <p className="mt-1.5 text-lg font-semibold text-white/70">
-        {value}
-      </p>
-
-    </div>
-  )
-}
-
-
-// ============================================================================
-// DEBT COMPONENTS
-// ============================================================================
-
-function DebtRankingRow({
-  person,
-  rank,
-}: {
-  person: UserAnalytics
-  rank: number
-}) {
-  return (
-    <div className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-black/10 p-3">
-
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-violet-400/10 bg-violet-400/[0.05] text-[10px] font-semibold text-violet-300">
-        #{rank}
-      </div>
-
-      <div className="min-w-0 flex-1">
-
-        <p className="truncate text-xs font-medium text-white/70">
-          {person.name}
-        </p>
-
-        <p className="mt-0.5 text-[9px] text-white/25">
-          Owes {formatRM(person.total_owed)}
-        </p>
-
-      </div>
-
-      <p className="text-sm font-semibold text-red-300">
-        {formatRM(person.balance)}
-      </p>
-
-    </div>
-  )
-}
-
-
-function MobileDebtCard({
-  person,
-}: {
-  person: UserAnalytics
-}) {
-  const outstanding =
-    person.balance > 0
-
-  return (
-    <div className="rounded-2xl border border-white/[0.06] bg-black/10 p-4">
-
-      <div className="flex items-center gap-3">
-
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.04] text-xs font-semibold text-white/60">
-          {person.name
-            .charAt(0)
-            .toUpperCase()}
-        </div>
-
-        <div className="min-w-0 flex-1">
-
-          <p className="truncate text-sm font-medium text-white/75">
-            {person.name}
-          </p>
-
-          <p className="text-[9px] text-white/20">
-            User #{person.user_id}
-          </p>
-
-        </div>
-
-        <span
-          className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold ${
-            outstanding
-              ? 'border-red-400/10 bg-red-400/[0.05] text-red-300'
-              : 'border-emerald-400/10 bg-emerald-400/[0.05] text-emerald-300'
-          }`}
-        >
-          {formatRM(person.balance)}
-        </span>
-
-      </div>
-
-
-      <div className="mt-4 grid grid-cols-2 gap-2">
-
-        <SmallFinancialValue
-          label="Owed"
-          value={formatRM(person.total_owed)}
-        />
-
-        <SmallFinancialValue
-          label="Paid"
-          value={formatRM(person.total_paid)}
-        />
-
-      </div>
-
-    </div>
-  )
-}
-
-
-function SmallFinancialValue({
-  label,
-  value,
-}: {
-  label: string
-  value: string
-}) {
-  return (
-    <div className="rounded-xl border border-white/[0.05] bg-white/[0.02] p-3">
-
-      <p className="text-[9px] uppercase tracking-wider text-white/20">
-        {label}
-      </p>
-
-      <p className="mt-1 text-xs font-medium text-white/60">
-        {value}
-      </p>
-
-    </div>
-  )
-}
-
-
-function DebtTableRow({
-  person,
-}: {
-  person: UserAnalytics
-}) {
-  const outstanding =
-    person.balance > 0
-
-  return (
-    <tr className="border-b border-white/[0.04] transition hover:bg-white/[0.025]">
-
-      <td className="px-4 py-4">
-
-        <div className="flex items-center gap-3">
-
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.04] text-xs font-semibold text-white/60">
-            {person.name
-              .charAt(0)
-              .toUpperCase()}
-          </div>
-
-          <div>
-
-            <p className="text-sm font-medium text-white/70">
-              {person.name}
-            </p>
-
-            <p className="text-[9px] text-white/20">
-              User #{person.user_id}
-            </p>
-
-          </div>
-
-        </div>
-
-      </td>
-
-
-      <td className="px-4 py-4 text-right text-sm text-white/60">
-        {formatRM(person.total_owed)}
-      </td>
-
-
-      <td className="px-4 py-4 text-right text-sm text-emerald-300/70">
-        {formatRM(person.total_paid)}
-      </td>
-
-
-      <td className="px-4 py-4 text-right">
-
-        <span
-          className={`inline-flex rounded-lg border px-3 py-1.5 text-xs font-semibold ${
-            outstanding
-              ? 'border-red-400/10 bg-red-400/[0.05] text-red-300'
-              : 'border-emerald-400/10 bg-emerald-400/[0.05] text-emerald-300'
-          }`}
-        >
-          {formatRM(person.balance)}
-        </span>
-
-      </td>
-
-    </tr>
-  )
-}
-
-
-// ============================================================================
-// SPENDING
-// ============================================================================
-
-function SpenderCard({
-  person,
-  rank,
-}: {
-  person: HighestSpender
-  rank: number
-}) {
-  return (
-    <div className="rounded-2xl border border-white/[0.06] bg-black/10 p-4 transition hover:border-violet-400/20 hover:bg-violet-400/[0.025]">
-
-      <div className="flex items-center justify-between">
-
-        <span className="text-[10px] font-semibold text-violet-300/60">
-          #{rank}
-        </span>
-
-      </div>
-
-      <p className="mt-3 truncate text-sm font-medium text-white/65">
-        {person.name}
-      </p>
-
-      <p className="mt-2 text-lg font-semibold">
-        {formatRM(person.total_spent)}
-      </p>
-
-      <p className="mt-1 text-[9px] text-white/20">
-        accumulated session cost
-      </p>
-
-    </div>
-  )
-}
-
-
-// ============================================================================
-// REQUESTS
-// ============================================================================
-
-function PaymentCard({
-  payment,
-  userName,
-  processing,
-  onConfirm,
-  onReject,
-}: {
-  payment: Payment
-  userName: string
-  processing: boolean
-  onConfirm: () => void
-  onReject: () => void
-}) {
-  return (
-    <div className="rounded-2xl border border-white/[0.07] bg-black/15 p-4 transition hover:border-white/[0.12] sm:p-5">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-blue-400/10 bg-blue-400/[0.05] text-sm font-semibold text-blue-200">
-              RM
-            </div>
-
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-sm font-semibold">
-                  Payment #{payment.id}
-                </h3>
-
-                <span className="rounded-full border border-yellow-400/10 bg-yellow-400/[0.05] px-2.5 py-1 text-[9px] uppercase tracking-wider text-yellow-300/70">
-                  Pending
-                </span>
-              </div>
-
-              <p className="mt-1 text-xs text-white/30">
-                {userName} (User #{payment.user_id})
-                {' · '}
-                Submitted {formatDateTime(payment.created_at)}
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-4 grid gap-2 sm:grid-cols-2">
-            <Detail
-              label="Amount"
-              value={formatRM(Number(payment.amount || 0))}
-            />
-
-            <Detail
-              label="Submitted"
-              value={formatDateTime(payment.created_at)}
-            />
-          </div>
-        </div>
-
-        <div className="flex shrink-0 gap-2 lg:flex-col">
-          <button
-            type="button"
-            disabled={processing}
-            onClick={onReject}
-            className="flex-1 rounded-xl border border-red-400/10 bg-red-400/[0.04] px-4 py-3 text-xs font-medium text-red-300 transition hover:bg-red-400/[0.08] disabled:cursor-not-allowed disabled:opacity-40 lg:min-w-[120px]"
-          >
-            {processing ? 'Processing...' : 'Reject'}
-          </button>
-
-          <button
-            type="button"
-            disabled={processing}
-            onClick={onConfirm}
-            className="flex-1 rounded-xl bg-white px-4 py-3 text-xs font-semibold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40 lg:min-w-[120px]"
-          >
-            {processing ? 'Processing...' : 'Confirm'}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-
-function RequestCard({
-  request,
-  processing,
-  onApprove,
-  onReject,
-}: {
-  request: SessionRequest
-  processing: boolean
-  onApprove: (id: number) => void
-  onReject: (id: number) => void
-}) {
-  return (
-    <div className="rounded-2xl border border-white/[0.07] bg-black/15 p-4 transition hover:border-white/[0.12] sm:p-5">
-
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-
-        <div className="min-w-0 flex-1">
-
-          <div className="flex items-start gap-3">
-
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-violet-400/10 bg-violet-400/[0.05] text-sm font-semibold text-violet-200">
-              {request.participants[0]?.user_name
-                ?.charAt(0)
-                .toUpperCase() ?? '?'}
-            </div>
-
-            <div className="min-w-0">
-
-              <div className="flex flex-wrap items-center gap-2">
-
-                <h3 className="text-sm font-semibold">
-                  Request #{request.id}
-                </h3>
-
-                <span className="rounded-full border border-yellow-400/10 bg-yellow-400/[0.05] px-2.5 py-1 text-[9px] uppercase tracking-wider text-yellow-300/70">
-                  Pending
-                </span>
-
-              </div>
-
-              <p className="mt-1 text-xs text-white/30">
-                Requested by user #{request.requested_by}
-              </p>
-
-            </div>
-
-          </div>
-
-
-          <div className="mt-4 grid gap-2 sm:grid-cols-3">
-
-            <Detail
-              label="Session date"
-              value={formatDate(
-                request.session_date,
-              )}
-            />
-
-            <Detail
-              label="Packets"
-              value={String(
-                request.packets_used,
-              )}
-            />
-
-            <Detail
-              label="Participants"
-              value={`${request.participants.length} people`}
-            />
-
-          </div>
-
-
-          <div className="mt-4">
-
-            <p className="text-[9px] uppercase tracking-wider text-white/20">
-              Participants
-            </p>
-
-            <div className="mt-2 flex flex-wrap gap-2">
-
-              {request.participants.map(
-                (participant) => (
-                  <span
-                    key={`${request.id}-${participant.user_id}`}
-                    className="rounded-lg border border-white/[0.07] bg-white/[0.03] px-3 py-1.5 text-xs text-white/50"
-                  >
-                    {participant.user_name}
-                  </span>
-                ),
-              )}
-
-            </div>
-
-          </div>
-
-
-          {request.note && (
-            <div className="mt-4 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
-
-              <p className="text-[9px] uppercase tracking-wider text-white/20">
-                Note
-              </p>
-
-              <p className="mt-1 text-xs leading-5 text-white/40">
-                {request.note}
-              </p>
-
-            </div>
-          )}
-
-        </div>
-
-
-        <div className="flex shrink-0 gap-2 lg:flex-col">
-
-          <button
-            type="button"
-            disabled={processing}
-            onClick={() =>
-              onReject(request.id)
-            }
-            className="flex-1 rounded-xl border border-red-400/10 bg-red-400/[0.04] px-4 py-3 text-xs font-medium text-red-300 transition hover:bg-red-400/[0.08] disabled:cursor-not-allowed disabled:opacity-40 lg:min-w-[120px]"
-          >
-            {processing
-              ? 'Processing...'
-              : 'Reject'}
-          </button>
-
-          <button
-            type="button"
-            disabled={processing}
-            onClick={() =>
-              onApprove(request.id)
-            }
-            className="flex-1 rounded-xl bg-white px-4 py-3 text-xs font-semibold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40 lg:min-w-[120px]"
-          >
-            {processing
-              ? 'Processing...'
-              : 'Approve'}
-          </button>
-
-        </div>
-
-      </div>
-
-    </div>
-  )
-}
-
-
-function HistoryRow({
-  request,
-}: {
-  request: SessionRequest
-}) {
-  const statusClass =
-    request.status === 'APPROVED'
-      ? 'border-emerald-400/10 bg-emerald-400/[0.05] text-emerald-300'
-      : request.status === 'REJECTED'
-        ? 'border-red-400/10 bg-red-400/[0.05] text-red-300'
-        : 'border-yellow-400/10 bg-yellow-400/[0.05] text-yellow-300'
-
-  return (
-    <div className="flex flex-col gap-3 rounded-xl border border-white/[0.06] bg-black/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex items-start justify-between gap-3">
 
       <div>
+        <div className="flex items-center gap-2">
 
-        <p className="text-sm font-medium">
-          Request #{request.id}
+          <span className="font-mono text-[7px] text-cyan-300/35">
+            {code}
+          </span>
+
+          <span className="h-px w-4 bg-white/[0.08]" />
+
+          <span className="font-mono text-[7px] uppercase tracking-[0.16em] text-white/20">
+            MODULE
+          </span>
+
+        </div>
+
+        <h2 className="mt-1 text-sm font-semibold">
+          {title}
+        </h2>
+
+        <p className="mt-0.5 font-mono text-[7px] text-white/20">
+          {subtitle}
         </p>
-
-        <p className="mt-1 text-xs text-white/30">
-          User #{request.requested_by}
-          {' · '}
-          {formatDate(
-            request.session_date,
-          )}
-          {' · '}
-          {request.participants.length}{' '}
-          participants
-        </p>
-
       </div>
 
-      <span
-        className={`w-fit rounded-full border px-3 py-1 text-[9px] uppercase tracking-wider ${statusClass}`}
-      >
-        {request.status}
-      </span>
+      {count !== undefined && (
+        <span className="rounded-full border border-cyan-300/10 bg-cyan-300/[0.025] px-2 py-1 font-mono text-[7px] text-cyan-200/50">
+          {String(count).padStart(2, '0')}
+        </span>
+      )}
 
     </div>
   )
 }
 
-
-function Detail({
+function Metric({
   label,
   value,
+  positive = false,
+  danger = false,
 }: {
   label: string
   value: string
+  positive?: boolean
+  danger?: boolean
 }) {
   return (
-    <div className="rounded-xl border border-white/[0.05] bg-white/[0.02] p-3">
+    <div className="rounded-lg border border-white/[0.05] bg-black/20 p-2.5">
 
-      <p className="text-[9px] uppercase tracking-wider text-white/20">
+      <p className="font-mono text-[7px] uppercase tracking-wider text-white/20">
         {label}
       </p>
 
-      <p className="mt-1.5 text-sm font-medium text-white/60">
+      <p
+        className={`mt-1 font-mono text-xs font-semibold ${
+          danger
+            ? 'text-red-300/80'
+            : positive
+              ? 'text-emerald-300/70'
+              : 'text-white/65'
+        }`}
+      >
         {value}
       </p>
 
@@ -1967,79 +1218,21 @@ function Detail({
   )
 }
 
-
-// ============================================================================
-// STATES
-// ============================================================================
-
-function LoadingBox({
+function Empty({
   text,
 }: {
   text: string
 }) {
   return (
-    <div className="rounded-2xl border border-white/[0.06] bg-black/10 p-8 text-center">
-
-      <div className="mx-auto h-5 w-5 animate-spin rounded-full border-2 border-white/10 border-t-white/60" />
-
-      <p className="mt-4 text-sm text-white/30">
-        {text}
-      </p>
-
+    <div className="rounded-xl border border-dashed border-white/[0.06] bg-black/10 p-4 text-center font-mono text-[8px] tracking-wider text-white/15">
+      {text}
     </div>
   )
 }
 
-
-function EmptyBox({
-  title,
-  description,
-}: {
-  title: string
-  description: string
-}) {
-  return (
-    <div className="rounded-2xl border border-dashed border-white/[0.07] bg-black/10 p-8 text-center">
-
-      <p className="text-sm text-white/40">
-        {title}
-      </p>
-
-      <p className="mt-2 text-xs text-white/20">
-        {description}
-      </p>
-
-    </div>
-  )
-}
-
-
-function Capability({
-  title,
-  description,
-}: {
-  title: string
-  description: string
-}) {
-  return (
-    <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4 transition hover:border-white/[0.12] hover:bg-white/[0.035] sm:p-5">
-
-      <p className="text-sm font-medium text-white/65">
-        {title}
-      </p>
-
-      <p className="mt-2 text-xs leading-5 text-white/25">
-        {description}
-      </p>
-
-    </div>
-  )
-}
-
-
-// ============================================================================
-// HELPERS
-// ============================================================================
+/* ========================================================================== */
+/* HELPERS                                                                    */
+/* ========================================================================== */
 
 function formatRM(value: number) {
   return `RM ${Number(value || 0).toLocaleString(
@@ -2051,34 +1244,28 @@ function formatRM(value: number) {
   )}`
 }
 
-
 function formatDate(value: string) {
-  const date =
-    new Date(`${value}T00:00:00`)
+  const date = new Date(`${value}T00:00:00`)
 
   if (Number.isNaN(date.getTime())) {
     return value
   }
 
-  return date.toLocaleDateString(
-    'en-MY',
-    {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    },
-  )
+  return date.toLocaleDateString('en-MY', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
 }
 
-
 function formatDateTime(value: string) {
-  const parsed = new Date(value)
+  const date = new Date(value)
 
-  if (Number.isNaN(parsed.getTime())) {
+  if (Number.isNaN(date.getTime())) {
     return value
   }
 
-  return parsed.toLocaleString('en-MY', {
+  return date.toLocaleString('en-MY', {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
@@ -2087,8 +1274,7 @@ function formatDateTime(value: string) {
   })
 }
 
-
-function calculateCollectionRate(
+function collectionRate(
   paid: number,
   total: number,
 ) {
@@ -2096,8 +1282,5 @@ function calculateCollectionRate(
     return 0
   }
 
-  return (
-    (paid / total) *
-    100
-  )
+  return (paid / total) * 100
 }
