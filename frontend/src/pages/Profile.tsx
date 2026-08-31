@@ -1,5 +1,4 @@
 import {
-  useEffect,
   useState,
   type ChangeEvent,
 } from 'react'
@@ -7,7 +6,6 @@ import { Link } from 'react-router-dom'
 
 import { apiRequest } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-
 
 type UserProfile = {
   id: number
@@ -18,65 +16,28 @@ type UserProfile = {
   avatar_data: string | null
 }
 
-
 export default function Profile() {
   const { user, updateUser } = useAuth()
 
-  const [profile, setProfile] =
-    useState<UserProfile | null>(null)
+  const [name, setName] =
+    useState(user?.name ?? '')
 
-  const [name, setName] = useState('')
   const [avatar, setAvatar] =
-    useState<string | null>(null)
+    useState<string | null>(
+      user?.avatar_data ?? null,
+    )
 
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
+  const [saving, setSaving] =
+    useState(false)
 
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
-
-  // ==========================================================================
-  // LOAD PROFILE
-  // ==========================================================================
-
-  useEffect(() => {
-    async function loadProfile() {
-      try {
-        setError('')
-
-        const data =
-          await apiRequest<UserProfile>(
-            '/api/users/me',
-          )
-
-        setProfile(data)
-        setName(data.name)
-        setAvatar(data.avatar_data)
-
-      } catch (err) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : 'Unable to load profile.',
-        )
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    loadProfile()
-  }, [])
-
-
-  // ==========================================================================
-  // AVATAR
-  // ==========================================================================
-
   async function handleImageChange(
     event: ChangeEvent<HTMLInputElement>,
   ) {
-    const file = event.target.files?.[0]
+    const file =
+      event.target.files?.[0]
 
     if (!file) {
       return
@@ -94,7 +55,6 @@ export default function Profile() {
       setSuccess(
         'New profile picture selected. Save your profile to apply it.',
       )
-
     } catch (err) {
       setError(
         err instanceof Error
@@ -105,7 +65,6 @@ export default function Profile() {
       event.target.value = ''
     }
   }
-
 
   async function handleRemoveAvatar() {
     if (!avatar) {
@@ -128,7 +87,6 @@ export default function Profile() {
           },
         )
 
-      setProfile(updated)
       setAvatar(updated.avatar_data)
 
       updateUser(updated)
@@ -136,7 +94,6 @@ export default function Profile() {
       setSuccess(
         'Profile picture removed successfully.',
       )
-
     } catch (err) {
       setError(
         err instanceof Error
@@ -148,13 +105,9 @@ export default function Profile() {
     }
   }
 
-
-  // ==========================================================================
-  // SAVE PROFILE
-  // ==========================================================================
-
   async function handleSave() {
-    const trimmedName = name.trim()
+    const trimmedName =
+      name.trim()
 
     if (!trimmedName) {
       setError('Name cannot be empty.')
@@ -178,7 +131,6 @@ export default function Profile() {
           },
         )
 
-      setProfile(updated)
       setName(updated.name)
       setAvatar(updated.avatar_data)
 
@@ -187,7 +139,6 @@ export default function Profile() {
       setSuccess(
         'Profile updated successfully.',
       )
-
     } catch (err) {
       setError(
         err instanceof Error
@@ -199,69 +150,31 @@ export default function Profile() {
     }
   }
 
-
-  // ==========================================================================
-  // LOADING
-  // ==========================================================================
-
-  if (loading) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-[#070910] text-white">
-
-        <div className="text-center">
-
-          <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-white/10 border-t-white/70" />
-
-          <p className="mt-4 text-sm text-white/40">
-            Loading profile...
-          </p>
-
-        </div>
-
-      </main>
-    )
-  }
-
-
-  // ==========================================================================
-  // PAGE
-  // ==========================================================================
-
   return (
     <main className="min-h-screen overflow-hidden bg-[#070910] text-white">
 
       {/* Ambient background */}
-
       <div className="pointer-events-none fixed inset-0">
-
         <div className="absolute left-1/2 top-[-300px] h-[600px] w-[600px] -translate-x-1/2 rounded-full bg-violet-500/[0.07] blur-[150px]" />
 
         <div className="absolute bottom-[-250px] left-[-150px] h-[500px] w-[500px] rounded-full bg-blue-500/[0.05] blur-[150px]" />
-
       </div>
 
-
       {/* Header */}
-
       <header className="relative z-10 border-b border-white/[0.06]">
-
         <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-5 sm:px-8">
 
           <Link
             to="/dashboard"
             className="flex items-center gap-3"
           >
-
             <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04]">
-
               <span className="font-bold">
                 K
               </span>
-
             </div>
 
             <div>
-
               <p className="text-sm font-semibold">
                 KoTrack
               </p>
@@ -269,11 +182,8 @@ export default function Profile() {
               <p className="text-[10px] uppercase tracking-wider text-white/25">
                 Profile
               </p>
-
             </div>
-
           </Link>
-
 
           <Link
             to="/dashboard"
@@ -283,16 +193,12 @@ export default function Profile() {
           </Link>
 
         </div>
-
       </header>
 
-
       {/* Content */}
-
       <div className="relative z-10 mx-auto max-w-3xl px-5 py-10 sm:px-8">
 
         {/* Heading */}
-
         <div className="mb-8">
 
           <p className="text-xs uppercase tracking-[0.16em] text-white/25">
@@ -302,7 +208,6 @@ export default function Profile() {
           <div className="mt-3 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
 
             <div>
-
               <h1 className="text-3xl font-semibold tracking-tight">
                 Profile
               </h1>
@@ -310,9 +215,7 @@ export default function Profile() {
               <p className="mt-2 text-sm text-white/35">
                 Manage your account information and profile picture.
               </p>
-
             </div>
-
 
             <Link
               to="/settings"
@@ -323,12 +226,9 @@ export default function Profile() {
             </Link>
 
           </div>
-
         </div>
 
-
         {/* Messages */}
-
         {(error || success) && (
           <div
             role="alert"
@@ -342,39 +242,29 @@ export default function Profile() {
           </div>
         )}
 
-
         {/* Profile card */}
-
         <section className="rounded-3xl border border-white/[0.08] bg-white/[0.025] p-6 shadow-[0_30px_100px_rgba(0,0,0,0.25)] backdrop-blur-xl sm:p-8">
 
           {/* Avatar */}
-
           <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
 
             <div className="shrink-0">
 
               {avatar ? (
-
                 <img
                   src={avatar}
                   alt="Profile avatar"
                   className="h-28 w-28 rounded-3xl border border-white/10 object-cover shadow-[0_0_40px_rgba(139,92,246,0.08)]"
                 />
-
               ) : (
-
                 <div className="flex h-28 w-28 items-center justify-center rounded-3xl border border-white/10 bg-gradient-to-br from-violet-400/[0.12] to-blue-400/[0.08] text-4xl font-semibold text-white/70">
-
                   {name
                     .charAt(0)
                     .toUpperCase() || '?'}
-
                 </div>
-
               )}
 
             </div>
-
 
             <div className="min-w-0">
 
@@ -392,7 +282,6 @@ export default function Profile() {
                 WebP before being uploaded.
               </p>
 
-
               <div className="mt-4 flex flex-wrap gap-2">
 
                 <label className="cursor-pointer rounded-xl bg-white px-4 py-2.5 text-xs font-semibold text-black transition hover:bg-white/90">
@@ -409,9 +298,7 @@ export default function Profile() {
 
                 </label>
 
-
                 {avatar && (
-
                   <button
                     type="button"
                     onClick={handleRemoveAvatar}
@@ -422,7 +309,6 @@ export default function Profile() {
                       ? 'Removing...'
                       : 'Remove picture'}
                   </button>
-
                 )}
 
               </div>
@@ -431,12 +317,9 @@ export default function Profile() {
 
           </div>
 
-
           <div className="my-8 border-t border-white/[0.06]" />
 
-
           {/* Name */}
-
           <div>
 
             <label
@@ -460,29 +343,23 @@ export default function Profile() {
 
           </div>
 
-
           {/* Account information */}
-
           <div className="mt-5 grid gap-5 sm:grid-cols-2">
 
             <ProfileValue
               label="User ID"
-              value={`#${profile?.id ?? user?.id ?? '—'}`}
+              value={`#${user?.id ?? '—'}`}
             />
 
             <ProfileValue
               label="Role"
-              value={
-                profile?.role ??
-                user?.role ??
-                'USER'
-              }
+              value={user?.role ?? 'USER'}
             />
 
             <ProfileValue
               label="Account status"
               value={
-                profile?.is_active
+                user?.is_active
                   ? 'Active'
                   : 'Inactive'
               }
@@ -491,9 +368,9 @@ export default function Profile() {
             <ProfileValue
               label="Member since"
               value={
-                profile?.created_at
+                user?.created_at
                   ? new Date(
-                      profile.created_at,
+                      user.created_at,
                     ).toLocaleDateString(
                       'en-MY',
                       {
@@ -508,9 +385,7 @@ export default function Profile() {
 
           </div>
 
-
           {/* Save */}
-
           <button
             type="button"
             onClick={handleSave}
@@ -527,15 +402,12 @@ export default function Profile() {
 
         </section>
 
-
         {/* Settings */}
-
         <section className="mt-6 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-5">
 
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 
             <div>
-
               <p className="text-sm font-medium text-white/65">
                 Account settings
               </p>
@@ -543,9 +415,7 @@ export default function Profile() {
               <p className="mt-1 text-xs leading-5 text-white/30">
                 Change your password and manage account security.
               </p>
-
             </div>
-
 
             <Link
               to="/settings"
@@ -560,14 +430,13 @@ export default function Profile() {
         </section>
 
       </div>
-
     </main>
   )
 }
 
 
 /* ========================================================================= */
-/* Profile Value                                                            */
+/* Profile Value                                                             */
 /* ========================================================================= */
 
 function ProfileValue({
@@ -594,7 +463,7 @@ function ProfileValue({
 
 
 /* ========================================================================= */
-/* Avatar Compression                                                       */
+/* Avatar Compression                                                        */
 /* ========================================================================= */
 
 async function compressAvatar(
@@ -635,12 +504,16 @@ async function compressAvatar(
 
     const width = Math.max(
       1,
-      Math.round(bitmap.width * scale),
+      Math.round(
+        bitmap.width * scale,
+      ),
     )
 
     const height = Math.max(
       1,
-      Math.round(bitmap.height * scale),
+      Math.round(
+        bitmap.height * scale,
+      ),
     )
 
     const canvas =

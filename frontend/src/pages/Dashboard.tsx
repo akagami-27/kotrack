@@ -4,15 +4,6 @@ import { Link } from 'react-router-dom'
 import { apiRequest } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 
-type UserProfile = {
-  id: number
-  name: string
-  role: string
-  is_active: boolean
-  created_at: string
-  avatar_data: string | null
-}
-
 type Balance = {
   user_id: number
   total_owed: string | number
@@ -50,9 +41,6 @@ type Payment = {
 export default function Dashboard() {
   const { user, logout } = useAuth()
 
-  const [profile, setProfile] =
-    useState<UserProfile | null>(null)
-
   const [balance, setBalance] =
     useState<Balance | null>(null)
 
@@ -71,14 +59,10 @@ export default function Dashboard() {
         setError('')
 
         const [
-          profileData,
           balanceData,
           sessionData,
           paymentData,
         ] = await Promise.all([
-          apiRequest<UserProfile>(
-            '/api/users/me',
-          ),
           apiRequest<Balance>(
             '/api/balance/me',
           ),
@@ -90,7 +74,6 @@ export default function Dashboard() {
           ),
         ])
 
-        setProfile(profileData)
         setBalance(balanceData)
         setSessions(sessionData)
         setPayments(paymentData)
@@ -108,14 +91,13 @@ export default function Dashboard() {
     loadDashboard()
   }, [])
 
-  const currentUserId =
-    profile?.id ?? user?.id
+  const currentUserId = user?.id
 
   const displayName =
-    profile?.name ?? user?.name ?? 'User'
+    user?.name ?? 'User'
 
   const avatar =
-    profile?.avatar_data ?? null
+    user?.avatar_data ?? null
 
   const userSessions = sessions
     .filter((session) =>
@@ -717,6 +699,7 @@ function ActionCard({
       to={to}
       className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-5 transition hover:border-white/[0.14] hover:bg-white/[0.04]"
     >
+
       <p className="text-sm font-medium">
         {title}
       </p>
@@ -728,6 +711,7 @@ function ActionCard({
       <p className="mt-4 text-xs text-white/40">
         Open →
       </p>
+
     </Link>
   )
 }

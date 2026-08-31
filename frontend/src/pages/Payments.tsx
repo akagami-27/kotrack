@@ -4,15 +4,6 @@ import { Link } from 'react-router-dom'
 import { apiRequest } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 
-type UserProfile = {
-  id: number
-  name: string
-  role: string
-  is_active: boolean
-  created_at: string
-  avatar_data: string | null
-}
-
 type Balance = {
   user_id: number
   total_owed: string | number
@@ -38,9 +29,6 @@ type Payment = {
 export default function Payments() {
   const { user, logout } = useAuth()
 
-  const [profile, setProfile] =
-    useState<UserProfile | null>(null)
-
   const [balance, setBalance] =
     useState<Balance | null>(null)
 
@@ -61,13 +49,9 @@ export default function Payments() {
       setError('')
 
       const [
-        profileData,
         balanceData,
         paymentData,
       ] = await Promise.all([
-        apiRequest<UserProfile>(
-          '/api/users/me',
-        ),
         apiRequest<Balance>(
           '/api/balance/me',
         ),
@@ -76,7 +60,6 @@ export default function Payments() {
         ),
       ])
 
-      setProfile(profileData)
       setBalance(balanceData)
       setPayments(paymentData)
     } catch (err) {
@@ -172,12 +155,10 @@ export default function Payments() {
   )
 
   const displayName =
-    profile?.name ??
-    user?.name ??
-    'Account'
+    user?.name ?? 'Account'
 
   const avatar =
-    profile?.avatar_data ?? null
+    user?.avatar_data ?? null
 
   return (
     <main className="min-h-screen bg-[#070910] text-white">
@@ -316,7 +297,6 @@ export default function Payments() {
 
         {!loading && (
           <>
-
             {/* Balance */}
             <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
 
@@ -646,7 +626,7 @@ function PaymentRow({
 
 
 /* -------------------------------------------------------------------------- */
-/* Status                                                                      */
+/* Status                                                                     */
 /* -------------------------------------------------------------------------- */
 
 function StatusBadge({
