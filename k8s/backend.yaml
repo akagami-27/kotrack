@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kotrack-backend
+  namespace: app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kotrack-backend
+  template:
+    metadata:
+      labels:
+        app: kotrack-backend
+    spec:
+      imagePullSecrets:
+        - name: harbor-registry
+
+      containers:
+        - name: backend
+          image: public-registry.smolelab.com/og/kotrack-backend:latest
+          imagePullPolicy: Always
+
+          ports:
+            - containerPort: 8000
+
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: kotrack-secrets
+                  key: DATABASE_URL
+
+            - name: JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: kotrack-secrets
+                  key: JWT_SECRET_KEY
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kotrack-backend
+  namespace: app
+spec:
+  selector:
+    app: kotrack-backend
+
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000
+
+  type: ClusterIP
