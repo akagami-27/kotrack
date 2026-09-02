@@ -207,7 +207,11 @@ export default function Landing() {
   return (
     <main
       ref={pageRef}
-      className="min-h-screen overflow-x-hidden bg-[#090806] text-white"
+      className="min-h-[100dvh] overflow-x-hidden bg-[#090806] text-white"
+      style={{
+        paddingBottom:
+          'env(safe-area-inset-bottom)',
+      }}
     >
       {/* ================================================================ */}
       {/* PARTY BACKGROUND                                                  */}
@@ -275,6 +279,10 @@ export default function Landing() {
       <nav
         ref={navRef}
         className="relative z-30 mx-auto flex max-w-6xl items-center justify-between px-5 py-5 sm:px-8 sm:py-7 lg:px-10"
+        style={{
+          paddingTop:
+            'max(1.25rem, env(safe-area-inset-top))',
+        }}
       >
         <Link
           to="/"

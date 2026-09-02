@@ -82,12 +82,15 @@ export default function Dashboard() {
           apiRequest<UserProfile>(
             '/api/users/me',
           ),
+
           apiRequest<Balance>(
             '/api/balance/me',
           ),
+
           apiRequest<DrinkSession[]>(
             '/api/sessions',
           ),
+
           apiRequest<Payment[]>(
             '/api/payments/me',
           ),
@@ -164,10 +167,22 @@ export default function Dashboard() {
     )
 
   return (
-    <main className="min-h-screen bg-[#070910] text-white">
-
+    <main
+      className="min-h-[100dvh] bg-[#070910] text-white"
+      style={{
+        paddingBottom:
+          'env(safe-area-inset-bottom)',
+      }}
+    >
       {/* Header */}
-      <header className="border-b border-white/[0.06]">
+
+      <header
+        className="border-b border-white/[0.06]"
+        style={{
+          paddingTop:
+            'max(0.75rem, env(safe-area-inset-top))',
+        }}
+      >
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 sm:py-4 lg:px-8">
 
           <Link
@@ -194,6 +209,7 @@ export default function Dashboard() {
           <div className="flex items-center gap-1.5 sm:gap-2">
 
             {/* Desktop profile */}
+
             <Link
               to="/profile"
               className="hidden items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 transition hover:bg-white/[0.07] sm:flex"
@@ -218,6 +234,7 @@ export default function Dashboard() {
             </Link>
 
             {/* Mobile profile */}
+
             <Link
               to="/profile"
               aria-label="Profile"
@@ -239,6 +256,7 @@ export default function Dashboard() {
             </Link>
 
             {/* Admin */}
+
             {user?.role === 'ADMIN' && (
               <Link
                 to="/admin"
@@ -249,6 +267,7 @@ export default function Dashboard() {
             )}
 
             {/* Payments */}
+
             <Link
               to="/payments"
               className="hidden rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-white/50 transition hover:bg-white/[0.07] hover:text-white sm:block"
@@ -257,6 +276,7 @@ export default function Dashboard() {
             </Link>
 
             {/* Logout */}
+
             <button
               type="button"
               onClick={logout}
@@ -270,9 +290,11 @@ export default function Dashboard() {
       </header>
 
       {/* Main content */}
+
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
 
         {/* Greeting */}
+
         <section>
           <div className="flex items-center gap-3">
 
@@ -307,6 +329,7 @@ export default function Dashboard() {
           </p>
 
           {/* Mobile navigation */}
+
           <div className="mt-3 flex gap-2 sm:hidden">
             <Link
               to="/sessions"
@@ -325,6 +348,7 @@ export default function Dashboard() {
         </section>
 
         {/* Loading */}
+
         {loading && (
           <section className="mt-6 rounded-2xl border border-white/[0.06] bg-white/[0.025] p-6 text-center">
             <p className="text-xs text-white/35">
@@ -334,6 +358,7 @@ export default function Dashboard() {
         )}
 
         {/* Error */}
+
         {!loading && error && (
           <section className="mt-6 rounded-2xl border border-red-400/10 bg-red-400/[0.05] p-4">
             <p className="text-sm font-medium text-red-300">
@@ -350,6 +375,7 @@ export default function Dashboard() {
           <>
 
             {/* Financial overview */}
+
             <section className="mt-6 grid grid-cols-2 gap-2.5 sm:mt-8 sm:gap-3 lg:grid-cols-4">
 
               <StatCard
@@ -360,7 +386,9 @@ export default function Dashboard() {
                     ? 'Amount currently owed'
                     : 'No outstanding balance'
                 }
-                warning={currentBalance > 0}
+                warning={
+                  currentBalance > 0
+                }
               />
 
               <StatCard
@@ -387,9 +415,11 @@ export default function Dashboard() {
             </section>
 
             {/* Recent activity */}
+
             <section className="mt-4 grid gap-4 lg:mt-5 lg:grid-cols-[1.4fr_1fr]">
 
               {/* Sessions */}
+
               <section className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4 sm:p-5">
 
                 <div className="flex items-center justify-between">
@@ -444,6 +474,7 @@ export default function Dashboard() {
               </section>
 
               {/* Payments */}
+
               <section className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4 sm:p-5">
 
                 <div className="flex items-center justify-between">
@@ -464,6 +495,7 @@ export default function Dashboard() {
                   >
                     View all
                   </Link>
+
                 </div>
 
                 {payments.length === 0 ? (
@@ -482,6 +514,7 @@ export default function Dashboard() {
                 )}
 
               </section>
+
             </section>
 
             {/* ============================================================ */}
@@ -509,6 +542,7 @@ export default function Dashboard() {
               />
 
               {/* Balance calculation */}
+
               <BalanceCard />
 
             </section>
@@ -520,7 +554,6 @@ export default function Dashboard() {
     </main>
   )
 }
-
 
 /* ============================================================================
    STAT CARD
@@ -574,7 +607,6 @@ function StatCard({
   )
 }
 
-
 /* ============================================================================
    SESSION ROW
 ============================================================================ */
@@ -621,7 +653,6 @@ function SessionRow({
     </div>
   )
 }
-
 
 /* ============================================================================
    PAYMENT ROW
@@ -672,7 +703,6 @@ function PaymentRow({
   )
 }
 
-
 /* ============================================================================
    PAYMENT STATUS
 ============================================================================ */
@@ -697,7 +727,6 @@ function StatusBadge({
     </span>
   )
 }
-
 
 /* ============================================================================
    ACTION CARD
@@ -734,7 +763,6 @@ function ActionCard({
   )
 }
 
-
 /* ============================================================================
    BALANCE CARD
 ============================================================================ */
@@ -768,7 +796,6 @@ function BalanceCard() {
     </section>
   )
 }
-
 
 /* ============================================================================
    EMPTY STATE

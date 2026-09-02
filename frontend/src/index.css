@@ -28,3 +28,70 @@ body {
   min-height: 100vh;
   background: #070910;
 }
+
+/* =========================================================
+   KoTrack Mobile Safe Area
+   iPhone notch / Dynamic Island / Home Indicator
+   ========================================================= */
+
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+}
+
+/*
+ * Prevent fixed/full-screen UI from touching the
+ * Dynamic Island / notch and iPhone home indicator.
+ */
+.safe-area {
+  padding-top: var(--safe-top);
+  padding-right: var(--safe-right);
+  padding-bottom: var(--safe-bottom);
+  padding-left: var(--safe-left);
+}
+
+/*
+ * Useful for pages that have content underneath
+ * the browser's safe area.
+ */
+.safe-area-top {
+  padding-top: var(--safe-top);
+}
+
+.safe-area-bottom {
+  padding-bottom: var(--safe-bottom);
+}
+
+.safe-area-x {
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+}
+
+/*
+ * Extra breathing room for bottom navigation,
+ * buttons and fixed controls.
+ */
+.safe-area-bottom-extra {
+  padding-bottom: calc(
+    var(--safe-bottom) + 12px
+  );
+}
+
+/*
+ * Make media and form controls behave consistently
+ * on older Safari versions.
+ */
+img,
+svg,
+video {
+  max-width: 100%;
+}
+
+button,
+input,
+textarea,
+select {
+  -webkit-tap-highlight-color: transparent;
+}

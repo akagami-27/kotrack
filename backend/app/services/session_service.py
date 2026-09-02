@@ -318,15 +318,44 @@ def update_drink_session(
     drink_session.price_per_packet = new_price_per_packet
     drink_session.total_cost = total_cost
 
-    # Rebuild participant rows so the amounts always match
-    # the new session configuration.
-    drink_session.participants = [
-        SessionParticipant(
-            user_id=user_id,
-            amount_owed=amount,
-        )
-        for user_id, amount in split.items()
-    ]
+    # IMPORTANT:
+    # Do NOT replace drink_session.participants with a new list.
+    #
+    # The database has a unique constraint on:
+    #     (session_id, user_id)
+    #
+    # Replacing the relationship can make SQLAlchemy INSERT the new
+    # participant before deleting the old one, causing a duplicate-key
+    # error when an existing participant stays in the session.
+    #
+    # Instead:
+    #   1. Update existing participants.
+    #   2. Delete participants removed from the session.
+    #   3. Insert only genuinely new participants.
+
+    existing_participants = {
+        participant.user_id: participant
+        for participant in drink_session.participants
+    }
+
+    selected_user_ids = set(split.keys())
+
+    # Update existing participants or mark removed participants for deletion.
+    for user_id, participant in existing_participants.items():
+        if user_id not in selected_user_ids:
+            db.delete(participant)
+        else:
+            participant.amount_owed = split[user_id]
+
+    # Add only participants that did not already exist.
+    for user_id, amount in split.items():
+        if user_id not in existing_participants:
+            drink_session.participants.append(
+                SessionParticipant(
+                    user_id=user_id,
+                    amount_owed=amount,
+                )
+            )
 
     db.flush()
 

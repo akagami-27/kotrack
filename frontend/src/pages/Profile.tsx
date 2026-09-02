@@ -227,7 +227,9 @@ export default function Profile() {
 
   if (loading) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#070910] text-white">
+      <main
+        className="flex min-h-[100dvh] items-center justify-center bg-[#070910] pb-[env(safe-area-inset-bottom)] pt-[max(1rem,env(safe-area-inset-top))] text-white"
+      >
         <p className="text-xs text-white/40 sm:text-sm">
           Loading profile...
         </p>
@@ -242,7 +244,9 @@ export default function Profile() {
     name.trim().charAt(0).toUpperCase() || '?'
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#070910] text-white">
+    <main
+      className="min-h-[100dvh] overflow-x-hidden bg-[#070910] pb-[env(safe-area-inset-bottom)] text-white"
+    >
       {/* Background */}
 
       <div className="pointer-events-none fixed inset-0">
@@ -253,7 +257,13 @@ export default function Profile() {
 
       {/* Header */}
 
-      <header className="relative z-10 border-b border-white/[0.06]">
+      <header
+        className="relative z-10 border-b border-white/[0.06]"
+        style={{
+          paddingTop:
+            'max(0.75rem, env(safe-area-inset-top))',
+        }}
+      >
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4 sm:px-8 sm:py-5">
           <Link
             to="/dashboard"
@@ -554,7 +564,10 @@ function ProfileValue({
 async function compressAvatar(
   file: File,
 ): Promise<string> {
-  if (!file.type.startsWith('image/')) {
+  if (
+    !file.type.startsWith('image/') &&
+    !isLikelyImageFile(file)
+  ) {
     throw new Error(
       'Please select a valid image file.',
     )
@@ -579,26 +592,43 @@ async function compressAvatar(
     const image =
       await loadImage(objectUrl)
 
+    const naturalWidth =
+      image.naturalWidth ||
+      image.width
+
+    const naturalHeight =
+      image.naturalHeight ||
+      image.height
+
+    if (
+      naturalWidth <= 0 ||
+      naturalHeight <= 0
+    ) {
+      throw new Error(
+        'The selected image could not be read.',
+      )
+    }
+
     const scale = Math.min(
       1,
       AVATAR_SIZE /
         Math.max(
-          image.naturalWidth,
-          image.naturalHeight,
+          naturalWidth,
+          naturalHeight,
         ),
     )
 
     const width = Math.max(
       1,
       Math.round(
-        image.naturalWidth * scale,
+        naturalWidth * scale,
       ),
     )
 
     const height = Math.max(
       1,
       Math.round(
-        image.naturalHeight * scale,
+        naturalHeight * scale,
       ),
     )
 
@@ -629,7 +659,8 @@ async function compressAvatar(
     )
 
     /*
-     * The backend requires WebP.
+     * Prefer WebP because that is the backend's
+     * preferred avatar format.
      */
     const webp =
       canvas.toDataURL(
@@ -637,56 +668,91 @@ async function compressAvatar(
         0.82,
       )
 
-    /*
-     * Safari/browser does not support WebP
-     * conversion through Canvas.
-     */
     if (
-      !webp.startsWith(
+      webp.startsWith(
         'data:image/webp;base64,',
       )
     ) {
-      throw new Error(
-        'This browser cannot convert the selected picture to WebP. Please update Safari or use a newer browser.',
-      )
-    }
+      if (webp.length <= MAX_AVATAR_SIZE) {
+        return webp
+      }
 
-    /*
-     * Try stronger compression if necessary.
-     */
-    if (webp.length > MAX_AVATAR_SIZE) {
-      const smaller =
+      const smallerWebp =
         canvas.toDataURL(
           'image/webp',
           0.65,
         )
 
       if (
-        !smaller.startsWith(
+        smallerWebp.startsWith(
           'data:image/webp;base64,',
-        )
+        ) &&
+        smallerWebp.length <=
+          MAX_AVATAR_SIZE
       ) {
-        throw new Error(
-          'Unable to create a compatible WebP image.',
-        )
+        return smallerWebp
       }
-
-      if (
-        smaller.length >
-        MAX_AVATAR_SIZE
-      ) {
-        throw new Error(
-          'The image is still too large after compression. Please choose another picture.',
-        )
-      }
-
-      return smaller
     }
 
-    return webp
+    /*
+     * Fallback for browsers/devices where WebP
+     * canvas encoding is unavailable or produces
+     * a file that is still too large.
+     *
+     * JPEG is supported broadly by iPhone,
+     * Android, Safari and modern browsers.
+     */
+    const jpegQualities = [
+      0.82,
+      0.7,
+      0.58,
+      0.45,
+    ]
+
+    for (const quality of jpegQualities) {
+      const jpeg =
+        canvas.toDataURL(
+          'image/jpeg',
+          quality,
+        )
+
+      if (
+        jpeg.startsWith(
+          'data:image/jpeg;base64,',
+        ) &&
+        jpeg.length <= MAX_AVATAR_SIZE
+      ) {
+        return jpeg
+      }
+    }
+
+    throw new Error(
+      'The image is still too large after compression. Please choose another picture.',
+    )
   } finally {
     URL.revokeObjectURL(objectUrl)
   }
+}
+
+/* ========================================================================= */
+/* Image File Detection                                                     */
+/* ========================================================================= */
+
+function isLikelyImageFile(
+  file: File,
+): boolean {
+  const name =
+    file.name.toLowerCase()
+
+  return (
+    name.endsWith('.jpg') ||
+    name.endsWith('.jpeg') ||
+    name.endsWith('.png') ||
+    name.endsWith('.webp') ||
+    name.endsWith('.gif') ||
+    name.endsWith('.heic') ||
+    name.endsWith('.heif')
+  )
 }
 
 /* ========================================================================= */

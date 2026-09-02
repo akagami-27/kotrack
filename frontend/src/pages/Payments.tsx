@@ -237,7 +237,7 @@ export default function Payments() {
     user?.avatar_data ?? null
 
   return (
-    <main className="min-h-screen bg-[#070910] text-white">
+    <header className="min-h-screen bg-[#070910] text-white">
       {/* HEADER */}
 
       <header className="border-b border-white/[0.06]">
@@ -609,7 +609,7 @@ export default function Payments() {
           </>
         )}
       </div>
-    </main>
+    </header>
   )
 }
 

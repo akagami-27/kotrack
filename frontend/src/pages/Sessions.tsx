@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { FormEvent} from 'react'
+import type { FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 
 import { apiRequest } from '../api/client'
@@ -225,10 +225,22 @@ export default function Sessions() {
   }
 
   return (
-    <main className="min-h-screen bg-[#070910] text-white">
-      <div className="min-h-screen">
+    <main
+      className="min-h-[100dvh] bg-[#070910] text-white"
+      style={{
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}
+    >
+      <div className="min-h-[100dvh]">
         {/* HEADER */}
-        <header className="flex h-16 items-center justify-between border-b border-white/[0.06] px-4 sm:h-20 sm:px-8 lg:px-10">
+
+        <header
+          className="flex min-h-16 items-center justify-between border-b border-white/[0.06] px-4 py-3 sm:min-h-20 sm:px-8 sm:py-4 lg:px-10"
+          style={{
+            paddingTop:
+              'max(0.75rem, env(safe-area-inset-top))',
+          }}
+        >
           <div>
             <p className="text-[9px] uppercase tracking-[0.15em] text-white/25 sm:text-[10px]">
               Workspace
@@ -248,8 +260,10 @@ export default function Sessions() {
         </header>
 
         {/* CONTENT */}
+
         <section className="mx-auto max-w-6xl px-4 py-5 sm:px-8 sm:py-8 lg:px-10">
           {/* TITLE */}
+
           <div>
             <p className="text-[10px] text-white/30 sm:text-xs">
               Your consumption history
@@ -266,6 +280,7 @@ export default function Sessions() {
           </div>
 
           {/* NEW SESSION */}
+
           <Link
             to="/sessions/new"
             className="mt-5 flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5 text-xs font-semibold text-black transition hover:bg-white/90 sm:mt-6 sm:min-h-11 sm:text-sm"
@@ -315,6 +330,7 @@ export default function Sessions() {
           </div>
 
           {/* LOADING */}
+
           {loading && (
             <section className="mt-4 rounded-xl border border-white/[0.07] bg-white/[0.025] p-6 text-center sm:mt-5 sm:rounded-2xl">
               <p className="text-xs text-white/35">
@@ -324,6 +340,7 @@ export default function Sessions() {
           )}
 
           {/* ERROR */}
+
           {!loading && error && (
             <section className="mt-4 rounded-xl border border-red-400/10 bg-red-400/[0.04] p-4 sm:mt-5 sm:rounded-2xl sm:p-5">
               <p className="text-xs font-medium text-red-300">
@@ -337,6 +354,7 @@ export default function Sessions() {
           )}
 
           {/* EMPTY */}
+
           {!loading &&
             !error &&
             sessions.length === 0 && (
@@ -408,21 +426,8 @@ export default function Sessions() {
                         session={session}
                         amountOwed={amountOwed}
                         usersById={usersById}
-                        canModify={canModifySession(
-                          session,
-                          currentUserId,
-                          isAdmin,
-                        )}
                         onOpen={() =>
                           setSelectedSession(session)
-                        }
-                        onEdit={() =>
-                          setEditingSession(session)
-                        }
-                        onDelete={() =>
-                          setDeletingSessionId(
-                            session.id,
-                          )
                         }
                       />
                     )
@@ -432,6 +437,7 @@ export default function Sessions() {
             )}
 
           {/* CALCULATION */}
+
           <section className="mt-4 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 sm:mt-5 sm:rounded-2xl sm:p-4">
             <div className="flex items-center gap-2.5">
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/[0.07] bg-white/[0.03]">
@@ -511,10 +517,7 @@ function SessionCard({
   session,
   amountOwed,
   usersById,
-  canModify,
   onOpen,
-  onEdit,
-  onDelete,
 }: {
   session: DrinkSession
   amountOwed: number
@@ -522,10 +525,7 @@ function SessionCard({
     number,
     UserDirectoryEntry
   >
-  canModify: boolean
   onOpen: () => void
-  onEdit: () => void
-  onDelete: () => void
 }) {
   const packets = Number(session.packets_used)
   const sessionTotal = Number(session.total_cost)
@@ -619,34 +619,6 @@ function SessionCard({
         </div>
       </button>
 
-      {/* ============================================================
-          ACTION BUTTONS
-
-          IMPORTANT:
-          These buttons are OUTSIDE the clickable session button.
-          This prevents the Edit button from being blocked by a
-          parent click handler.
-         ============================================================ */}
-
-      {canModify && (
-        <div className="mt-2 grid grid-cols-2 gap-1.5 border-t border-white/[0.05] pt-2">
-          <button
-            type="button"
-            onClick={onEdit}
-            className="min-h-8 touch-manipulation rounded-lg border border-white/[0.07] bg-white/[0.03] px-2 py-1.5 text-[9px] font-medium text-white/55 transition hover:bg-white/[0.07] hover:text-white active:scale-[0.98] sm:min-h-9 sm:text-[10px]"
-          >
-            Edit
-          </button>
-
-          <button
-            type="button"
-            onClick={onDelete}
-            className="min-h-8 touch-manipulation rounded-lg border border-red-400/10 bg-red-400/[0.04] px-2 py-1.5 text-[9px] font-medium text-red-300/70 transition hover:bg-red-400/[0.08] hover:text-red-300 active:scale-[0.98] sm:min-h-9 sm:text-[10px]"
-          >
-            Delete
-          </button>
-        </div>
-      )}
     </article>
   )
 }
@@ -678,9 +650,11 @@ function SessionDetails({
   onDelete: () => void
 }) {
   const packets = Number(session.packets_used)
+
   const pricePerPacket = Number(
     session.price_per_packet,
   )
+
   const totalCost = Number(session.total_cost)
 
   const currentParticipant =
@@ -696,8 +670,19 @@ function SessionDetails({
   )
 
   return (
-    <main className="min-h-screen bg-[#070910] text-white">
-      <header className="flex h-16 items-center justify-between border-b border-white/[0.06] px-4 sm:h-20 sm:px-8 lg:px-10">
+    <main
+      className="min-h-[100dvh] bg-[#070910] text-white"
+      style={{
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}
+    >
+      <header
+        className="flex min-h-16 items-center justify-between border-b border-white/[0.06] px-4 py-3 sm:min-h-20 sm:px-8 sm:py-4 lg:px-10"
+        style={{
+          paddingTop:
+            'max(0.75rem, env(safe-area-inset-top))',
+        }}
+      >
         <div>
           <p className="text-[9px] uppercase tracking-[0.15em] text-white/25 sm:text-[10px]">
             Workspace
