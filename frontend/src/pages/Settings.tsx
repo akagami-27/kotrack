@@ -91,7 +91,7 @@ export default function Settings() {
   }
 
   return (
-    <main className="min-h-screen bg-[#070910] text-white">
+    <header className="min-h-screen bg-[#070910] text-white">
       <div className="mx-auto max-w-3xl px-5 py-10 sm:px-8">
 
         <div className="mb-8 flex items-center justify-between gap-4">
@@ -218,7 +218,7 @@ export default function Settings() {
         </section>
 
       </div>
-    </main>
+    </header>
   )
 }
 

@@ -237,7 +237,9 @@ export default function Payments() {
     user?.avatar_data ?? null
 
   return (
-    <header className="min-h-screen bg-[#070910] text-white">
+    <header
+      className="min-h-screen bg-[#070910] pt-[env(safe-area-inset-top)] text-white"
+    >
       {/* HEADER */}
 
       <header className="border-b border-white/[0.06]">
@@ -310,7 +312,7 @@ export default function Payments() {
 
       {/* PAGE */}
 
-      <div className="mx-auto max-w-6xl px-4 py-5 sm:px-8 sm:py-8">
+      <div className="mx-auto max-w-6xl px-4 py-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] sm:px-8 sm:py-8 sm:pb-8">
         {/* TITLE */}
 
         <section>
