@@ -151,7 +151,9 @@ export default function RequestSession() {
 
   if (submitted) {
     return (
-      <main className="min-h-screen bg-[#070910] text-white">
+      <main
+        className="min-h-screen bg-[#070910] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-white"
+      >
         <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-5">
           <div className="pointer-events-none absolute inset-0">
             <div className="absolute left-1/2 top-1/2 h-[500px] w-[500px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-violet-600/[0.06] blur-[150px]" />
@@ -251,7 +253,9 @@ export default function RequestSession() {
   }
 
   return (
-    <main className="min-h-screen bg-[#070910] text-white">
+    <main
+      className="min-h-screen bg-[#070910] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-white"
+    >
       <div className="flex min-h-screen">
         {/* Sidebar */}
         <aside className="hidden w-64 shrink-0 border-r border-white/[0.06] lg:flex lg:flex-col">
@@ -628,7 +632,7 @@ export default function RequestSession() {
               </div>
 
               {/* Actions */}
-              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <div className="mt-6 flex flex-col-reverse gap-3 pb-[env(safe-area-inset-bottom)] sm:flex-row sm:justify-end sm:pb-0">
                 <Link
                   to="/sessions"
                   className="rounded-xl border border-white/[0.08] bg-white/[0.02] px-5 py-3 text-center text-xs font-medium text-white/45 transition hover:bg-white/[0.05] hover:text-white"
