@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { SyntheticEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
-import { useAuth } from '../auth/AuthContext'
+import { useAuth } from '../auth/useAuth'
 import { apiRequest } from '../api/client'
 
 type ResetStep = 'request' | 'confirm'

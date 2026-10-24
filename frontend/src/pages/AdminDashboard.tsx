@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 
 import { apiRequest } from '../api/client'
-import { useAuth } from '../auth/AuthContext'
+import { useAuth } from '../auth/useAuth'
 
 type Participant = {
   user_id: number
@@ -121,7 +121,7 @@ export default function AdminDashboard() {
   const [editingSession, setEditingSession] = useState<DrinkSession | null>(null)
   const [deletingSession, setDeletingSession] = useState<DrinkSession | null>(null)
 
-  async function loadRequests() {
+  const loadRequests = useCallback(async () => {
     try {
       const data = await apiRequest<SessionRequest[]>('/api/session-requests')
       setRequests(data)
@@ -130,9 +130,9 @@ export default function AdminDashboard() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
-  async function loadUsers() {
+  const loadUsers = useCallback(async () => {
     try {
       setUserError('')
       const data = await apiRequest<ManagedUser[]>('/api/users/admin/all')
@@ -142,9 +142,9 @@ export default function AdminDashboard() {
     } finally {
       setLoadingUsers(false)
     }
-  }
+  }, [])
 
-  async function loadSessions() {
+  const loadSessions = useCallback(async () => {
     try {
       setSessionError('')
       const data = await apiRequest<DrinkSession[]>('/api/sessions')
@@ -154,9 +154,9 @@ export default function AdminDashboard() {
     } finally {
       setLoadingSessions(false)
     }
-  }
+  }, [])
 
-  async function loadAnalytics() {
+  const loadAnalytics = useCallback(async () => {
     try {
       const data = await apiRequest<AnalyticsResponse>('/api/admin/analytics')
       setAnalytics(data)
@@ -165,9 +165,9 @@ export default function AdminDashboard() {
     } finally {
       setAnalyticsLoading(false)
     }
-  }
+  }, [])
 
-  async function loadPayments() {
+  const loadPayments = useCallback(async () => {
     try {
       const data = await apiRequest<Payment[]>('/api/payments/admin/pending')
       setPayments(data.filter((payment) => payment.status === 'PENDING'))
@@ -176,7 +176,7 @@ export default function AdminDashboard() {
     } finally {
       setPaymentsLoading(false)
     }
-  }
+  }, [])
 
   async function handlePaymentAction(
     paymentId: number,
@@ -202,7 +202,7 @@ export default function AdminDashboard() {
     }
   }
 
-  async function loadDashboard() {
+  const loadDashboard = useCallback(async () => {
     setError('')
     setLoading(true)
     setLoadingUsers(true)
@@ -217,7 +217,7 @@ export default function AdminDashboard() {
       loadAnalytics(),
       loadPayments(),
     ])
-  }
+  }, [loadAnalytics, loadPayments, loadRequests, loadSessions, loadUsers])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -234,10 +234,16 @@ export default function AdminDashboard() {
   }, [])
 
   useEffect(() => {
-    if (user?.role === 'ADMIN') {
-      void loadDashboard()
+    if (user?.role !== 'ADMIN') {
+      return
     }
-  }, [user])
+
+    const timer = window.setTimeout(() => {
+      void loadDashboard()
+    }, 0)
+
+    return () => window.clearTimeout(timer)
+  }, [loadDashboard, user?.role])
 
   async function handleApprove(requestId: number) {
     setProcessingId(requestId)

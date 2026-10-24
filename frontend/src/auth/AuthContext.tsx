@@ -1,39 +1,17 @@
 import {
-  createContext,
-  useContext,
   useEffect,
   useState,
   type ReactNode,
 } from 'react'
 
 import { apiRequest } from '../api/client'
-
-type User = {
-  id: number
-  name: string
-  role: string
-  is_active: boolean
-  created_at?: string
-  avatar_data?: string | null
-}
+import { AuthContext, type User } from './AuthContextValue'
 
 type LoginResponse = {
   access_token: string
   token_type: string
 }
 
-type AuthContextType = {
-  user: User | null
-  token: string | null
-  loading: boolean
-  login: (name: string, password: string) => Promise<void>
-  logout: () => void
-  updateUser: (user: User) => void
-}
-
-const AuthContext = createContext<
-  AuthContextType | undefined
->(undefined)
 
 const TOKEN_KEY = 'kotrack_access_token'
 
@@ -197,17 +175,4 @@ export function AuthProvider({
       {children}
     </AuthContext.Provider>
   )
-}
-
-export function useAuth() {
-  const context =
-    useContext(AuthContext)
-
-  if (!context) {
-    throw new Error(
-      'useAuth must be used inside AuthProvider',
-    )
-  }
-
-  return context
 }

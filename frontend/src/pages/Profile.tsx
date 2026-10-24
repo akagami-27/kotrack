@@ -6,7 +6,7 @@ import {
 import { Link } from 'react-router-dom'
 
 import { apiRequest } from '../api/client'
-import { useAuth } from '../auth/AuthContext'
+import { useAuth } from '../auth/useAuth'
 
 type UserProfile = {
   id: number

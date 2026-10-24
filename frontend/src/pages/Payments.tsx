@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useState,
   type ChangeEvent,
@@ -7,7 +8,7 @@ import {
 import { Link } from 'react-router-dom'
 
 import { apiRequest } from '../api/client'
-import { useAuth } from '../auth/AuthContext'
+import { useAuth } from '../auth/useAuth'
 
 type Balance = {
   user_id: number
@@ -62,36 +63,51 @@ export default function Payments() {
   const [success, setSuccess] =
     useState('')
 
-  async function loadPaymentPage() {
-    try {
-      setError('')
+  const loadPaymentPage = useCallback(
+    async (isCurrent: () => boolean = () => true) => {
+      try {
+        if (isCurrent()) setError('')
 
-      const [balanceData, paymentData] =
-        await Promise.all([
+        const [balanceData, paymentData] =
+          await Promise.all([
           apiRequest<Balance>(
             '/api/balance/me',
           ),
           apiRequest<Payment[]>(
             '/api/payments/me',
           ),
-        ])
+          ])
 
-      setBalance(balanceData)
-      setPayments(paymentData)
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : 'Unable to load payment information.',
-      )
-    } finally {
-      setLoading(false)
-    }
-  }
+        if (isCurrent()) {
+          setBalance(balanceData)
+          setPayments(paymentData)
+        }
+      } catch (err) {
+        if (isCurrent()) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : 'Unable to load payment information.',
+          )
+        }
+      } finally {
+        if (isCurrent()) setLoading(false)
+      }
+    },
+    [],
+  )
 
   useEffect(() => {
-    void loadPaymentPage()
-  }, [])
+    let active = true
+    const timer = window.setTimeout(() => {
+      void loadPaymentPage(() => active)
+    }, 0)
+
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [loadPaymentPage])
 
   function handleReceiptChange(
     event: ChangeEvent<HTMLInputElement>,
