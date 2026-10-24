@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
-import { useAuth } from '../auth/AuthContext'
+import { useAuth } from '../auth/useAuth'
 import { apiRequest } from '../api/client'
 
 type User = {
@@ -25,7 +25,11 @@ export default function RequestSession() {
   const [note, setNote] = useState('')
 
   const [users, setUsers] = useState<User[]>([])
-  const [selectedUserIds, setSelectedUserIds] = useState<number[]>([])
+  const [selectedParticipantIds, setSelectedParticipantIds] = useState<number[]>([])
+  const selectedUserIds =
+    user && !selectedParticipantIds.includes(user.id)
+      ? [user.id, ...selectedParticipantIds]
+      : selectedParticipantIds
 
   const [loadingUsers, setLoadingUsers] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -56,19 +60,8 @@ export default function RequestSession() {
     loadUsers()
   }, [])
 
-  // Always include the currently logged-in user.
-  useEffect(() => {
-    if (user) {
-      setSelectedUserIds((current) =>
-        current.includes(user.id)
-          ? current
-          : [user.id, ...current],
-      )
-    }
-  }, [user])
-
   function toggleParticipant(userId: number) {
-    setSelectedUserIds((current) => {
+    setSelectedParticipantIds((current) => {
       if (current.includes(userId)) {
         // Prevent the requester from removing themselves.
         if (userId === user?.id) {

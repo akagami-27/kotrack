@@ -76,21 +76,11 @@ export async function apiRequest<T>(
       'content-type',
     ) || ''
 
-  let data: unknown = null
-
-  if (
-    contentType.includes(
-      'application/json',
-    )
-  ) {
-    data = await response
-      .json()
-      .catch(() => null)
-  } else {
-    data = await response
-      .text()
-      .catch(() => null)
-  }
+  const data: unknown = contentType.includes(
+    'application/json',
+  )
+    ? await response.json().catch(() => null)
+    : await response.text().catch(() => null)
 
   if (!response.ok) {
     let message =

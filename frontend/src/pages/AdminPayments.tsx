@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { apiRequest } from '../api/client'
-import { useAuth } from '../auth/AuthContext'
+import { useAuth } from '../auth/useAuth'
 
 type PaymentStatus = 'PENDING' | 'CONFIRMED' | 'REJECTED'
 
@@ -25,33 +25,46 @@ export default function AdminPayments() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
-  async function loadPayments() {
-    try {
-      setError('')
+  const loadPayments = useCallback(
+    async (isCurrent: () => boolean = () => true) => {
+      try {
+        if (isCurrent()) setError('')
 
-      const data = await apiRequest<Payment[]>(
-        '/api/payments',
-      )
+        const data = await apiRequest<Payment[]>(
+          '/api/payments',
+        )
 
-      setPayments(data)
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : 'Unable to load payments.',
-      )
-    } finally {
-      setLoading(false)
-    }
-  }
+        if (isCurrent()) setPayments(data)
+      } catch (err) {
+        if (isCurrent()) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : 'Unable to load payments.',
+          )
+        }
+      } finally {
+        if (isCurrent()) setLoading(false)
+      }
+    },
+    [],
+  )
 
   useEffect(() => {
-    if (user?.role === 'ADMIN') {
-      loadPayments()
-    } else {
-      setLoading(false)
+    let active = true
+    const timer = window.setTimeout(() => {
+      if (user?.role === 'ADMIN') {
+        void loadPayments(() => active)
+      } else {
+        setLoading(false)
+      }
+    }, 0)
+
+    return () => {
+      active = false
+      window.clearTimeout(timer)
     }
-  }, [user?.role])
+  }, [loadPayments, user?.role])
 
   async function handleAction(
     paymentId: number,
