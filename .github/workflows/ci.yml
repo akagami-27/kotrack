@@ -144,3 +144,94 @@ jobs:
           tags: |
             public-registry.smolelab.com/og/kotrack-backend:${{ github.sha }}
             public-registry.smolelab.com/og/kotrack-backend:latest
+
+  deploy-production:
+    name: Deploy KoTrack to Kubernetes
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [publish-images]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure Rancher connection
+        shell: bash
+        env:
+          RANCHER_ACCESS_KEY: ${{ secrets.RANCHER_ACCESS_KEY }}
+          RANCHER_SECRET_KEY: ${{ secrets.RANCHER_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$RANCHER_ACCESS_KEY" || -z "$RANCHER_SECRET_KEY" ]]; then
+            echo "Rancher credentials are missing."
+            exit 1
+          fi
+
+          kubectl config set-cluster rancher \
+            --server=https://rancher.smolelab.com/k8s/clusters/local
+
+          kubectl config set-credentials github-actions \
+            --token="${RANCHER_ACCESS_KEY}:${RANCHER_SECRET_KEY}"
+
+          kubectl config set-context kotrack-production \
+            --cluster=rancher \
+            --user=github-actions \
+            --namespace=app
+
+          kubectl config use-context kotrack-production
+
+      - name: Check deployment permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$(kubectl auth can-i get deployments -n app)" != "yes" ]]; then
+            echo "Missing permission to read deployments in namespace app."
+            exit 1
+          fi
+
+          if [[ "$(kubectl auth can-i patch deployments -n app)" != "yes" ]]; then
+            echo "Missing permission to patch deployments in namespace app."
+            exit 1
+          fi
+
+      - name: Verify target deployments
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          kubectl get deployment kotrack-backend -n app
+          kubectl get deployment kotrack-frontend -n app
+
+      - name: Deploy backend image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          kubectl set image deployment/kotrack-backend \
+            kotrack-backend="public-registry.smolelab.com/og/kotrack-backend:${GITHUB_SHA}" \
+            -n app
+
+          kubectl rollout status deployment/kotrack-backend \
+            -n app --timeout=180s
+
+      - name: Deploy frontend image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          kubectl set image deployment/kotrack-frontend \
+            kotrack-frontend="public-registry.smolelab.com/og/kotrack-frontend:${GITHUB_SHA}" \
+            -n app
+
+          kubectl rollout status deployment/kotrack-frontend \
+            -n app --timeout=180s
+
+      - name: Verify final deployment state
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          kubectl get deployment kotrack-backend kotrack-frontend -n app
