@@ -2,7 +2,7 @@
 Session request API endpoints.
 
 Normal users can submit and view their own requests.
-Admins can view, approve, and reject requests.
+Admins can view and review requests assigned to them; super admins can review all.
 
 Only approved requests become actual DrinkSession records.
 """
@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user, require_admin
 from app.db.session import get_db
+from app.models.enums import UserRole
 from app.models.session_request import SessionRequest
 from app.models.user import User
 from app.schemas.session_request import (
@@ -57,6 +58,7 @@ def create_request(
             packets_used=request_data.packets_used,
             participant_user_ids=request_data.participant_user_ids,
             note=request_data.note,
+            handler_id=request_data.handler_id,
         )
 
         # IMPORTANT:
@@ -110,7 +112,9 @@ def list_all_requests(
     ADMIN only.
     """
 
-    return get_session_requests(db)
+    if current_user.role == UserRole.SUPER_ADMIN:
+        return get_session_requests(db)
+    return get_session_requests(db, handler_id=current_user.id)
 
 
 @router.get(
@@ -126,7 +130,7 @@ def get_request(
     Return a session request.
 
     Users can only view their own requests.
-    Admins can view any request.
+    Admins can view requests assigned to them; super admins can view all.
     """
 
     request = get_session_request(
@@ -140,10 +144,18 @@ def get_request(
             detail="Session request not found",
         )
 
-    if (
-        current_user.role.value != "ADMIN"
-        and request.requested_by != current_user.id
-    ):
+    is_super_admin = current_user.role == UserRole.SUPER_ADMIN
+    is_assigned_admin = (
+        current_user.role == UserRole.ADMIN
+        and request.handler_id == current_user.id
+    )
+    is_requester = request.requested_by == current_user.id
+    if not (is_super_admin or is_assigned_admin or is_requester):
+        if current_user.role == UserRole.ADMIN:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session request not found",
+            )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to view this request",
@@ -181,6 +193,15 @@ def approve_request(
             detail="Session request not found",
         )
 
+    if (
+        current_user.role == UserRole.ADMIN
+        and request.handler_id != current_user.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session request not found",
+        )
+
     try:
         approve_session_request(
             db,
@@ -201,6 +222,12 @@ def approve_request(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
+        ) from exc
+    except PermissionError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session request not found",
         ) from exc
 
 
@@ -230,6 +257,15 @@ def reject_request(
             detail="Session request not found",
         )
 
+    if (
+        current_user.role == UserRole.ADMIN
+        and request.handler_id != current_user.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session request not found",
+        )
+
     try:
         result = reject_session_request(
             db,
@@ -249,4 +285,10 @@ def reject_request(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
+        ) from exc
+    except PermissionError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session request not found",
         ) from exc

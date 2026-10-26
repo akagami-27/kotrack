@@ -4,11 +4,19 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class SessionHandlerRead(BaseModel):
+    id: int
+    name: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class SessionRequestCreate(BaseModel):
     session_date: date
     packets_used: Decimal = Field(gt=0)
     participant_user_ids: list[int] = Field(min_length=1)
     note: str | None = None
+    handler_id: int | None = None
 
 
 class SessionRequestParticipantRead(BaseModel):
@@ -28,6 +36,8 @@ class SessionRequestRead(BaseModel):
     created_at: datetime
     reviewed_at: datetime | None
     reviewed_by: int | None
+    handler_id: int | None = None
+    handler_name: str | None = None
     participants: list[SessionRequestParticipantRead]
 
     model_config = ConfigDict(from_attributes=True)

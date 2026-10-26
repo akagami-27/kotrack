@@ -16,29 +16,53 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.drink_session import DrinkSession
-from app.models.enums import PaymentStatus
+from app.models.enums import PaymentStatus, UserRole
 from app.models.payment import Payment
 from app.models.session_participant import SessionParticipant
 from app.models.session_request import SessionRequest
 from app.models.user import User
+from app.services.payment_access import handled_payment_user_ids
 
 
 ZERO = Decimal("0.00")
 
 
-def get_admin_summary(db: Session) -> dict:
+def _handled_participant_ids(handler_id: int):
+    return (
+        select(SessionParticipant.user_id)
+        .join(DrinkSession, DrinkSession.id == SessionParticipant.session_id)
+        .where(DrinkSession.handler_id == handler_id)
+    )
+
+
+def get_admin_summary(
+    db: Session,
+    handler_id: int | None = None,
+) -> dict:
     """
     Return high-level statistics for the admin dashboard.
     """
 
+    session_scope = (
+        [] if handler_id is None else [DrinkSession.handler_id == handler_id]
+    )
+    user_scope = (
+        []
+        if handler_id is None
+        else [User.id.in_(_handled_participant_ids(handler_id))]
+    )
+    payment_scope = (
+        []
+        if handler_id is None
+        else [Payment.user_id.in_(handled_payment_user_ids(handler_id))]
+    )
+
     total_users = db.scalar(
-        select(func.count(User.id)).where(
-            User.is_active.is_(True)
-        )
+        select(func.count(User.id)).where(User.is_active.is_(True), *user_scope)
     ) or 0
 
     total_sessions = db.scalar(
-        select(func.count(DrinkSession.id))
+        select(func.count(DrinkSession.id)).where(*session_scope)
     ) or 0
 
     total_packets = db.scalar(
@@ -48,16 +72,23 @@ def get_admin_summary(db: Session) -> dict:
                 ZERO,
             )
         )
+        .where(*session_scope)
     ) or ZERO
 
-    total_session_value = db.scalar(
-        select(
-            func.coalesce(
-                func.sum(DrinkSession.total_cost),
-                ZERO,
+    if handler_id is None:
+        total_session_value_query = select(
+            func.coalesce(func.sum(DrinkSession.total_cost), ZERO)
+        )
+    else:
+        total_session_value_query = (
+            select(func.coalesce(func.sum(SessionParticipant.amount_owed), ZERO))
+            .join(DrinkSession, DrinkSession.id == SessionParticipant.session_id)
+            .where(
+                DrinkSession.handler_id == handler_id,
+                SessionParticipant.user_id.in_(handled_payment_user_ids(handler_id)),
             )
         )
-    ) or ZERO
+    total_session_value = db.scalar(total_session_value_query) or ZERO
 
     total_confirmed_payments = db.scalar(
         select(
@@ -66,7 +97,8 @@ def get_admin_summary(db: Session) -> dict:
                 ZERO,
             )
         ).where(
-            Payment.status == PaymentStatus.CONFIRMED
+            Payment.status == PaymentStatus.CONFIRMED,
+            *payment_scope,
         )
     ) or ZERO
 
@@ -77,13 +109,15 @@ def get_admin_summary(db: Session) -> dict:
 
     pending_payments = db.scalar(
         select(func.count(Payment.id)).where(
-            Payment.status == PaymentStatus.PENDING
+            Payment.status == PaymentStatus.PENDING,
+            *payment_scope,
         )
     ) or 0
 
     pending_session_requests = db.scalar(
         select(func.count(SessionRequest.id)).where(
-            SessionRequest.status == "PENDING"
+            SessionRequest.status == "PENDING",
+            *([] if handler_id is None else [SessionRequest.handler_id == handler_id]),
         )
     ) or 0
 
@@ -105,6 +139,7 @@ def get_admin_summary(db: Session) -> dict:
 
 def get_admin_user_balances(
     db: Session,
+    handler_id: int | None = None,
 ) -> list[dict]:
     """
     Return every active user's financial position.
@@ -118,7 +153,7 @@ def get_admin_user_balances(
     be able to see the financial status of every active user.
     """
 
-    owed_subquery = (
+    owed_query = (
         select(
             SessionParticipant.user_id.label("user_id"),
             func.coalesce(
@@ -126,11 +161,14 @@ def get_admin_user_balances(
                 ZERO,
             ).label("total_owed"),
         )
-        .group_by(
-            SessionParticipant.user_id
-        )
-        .subquery()
+        .group_by(SessionParticipant.user_id)
     )
+    if handler_id is not None:
+        owed_query = owed_query.join(
+            DrinkSession,
+            DrinkSession.id == SessionParticipant.session_id,
+        ).where(DrinkSession.handler_id == handler_id)
+    owed_subquery = owed_query.subquery()
 
     paid_subquery = (
         select(
@@ -141,7 +179,8 @@ def get_admin_user_balances(
             ).label("total_paid"),
         )
         .where(
-            Payment.status == PaymentStatus.CONFIRMED
+            Payment.status == PaymentStatus.CONFIRMED,
+            *([] if handler_id is None else [Payment.user_id.in_(handled_payment_user_ids(handler_id))]),
         )
         .group_by(
             Payment.user_id
@@ -177,6 +216,8 @@ def get_admin_user_balances(
             User.name.asc()
         )
     )
+    if handler_id is not None:
+        stmt = stmt.where(User.id.in_(handled_payment_user_ids(handler_id)))
 
     rows = db.execute(stmt).all()
 
@@ -216,6 +257,7 @@ def get_highest_debt_users(
 def get_highest_spenders(
     db: Session,
     limit: int = 5,
+    handler_id: int | None = None,
 ) -> list[dict]:
     """
     Return users ordered by their total amount owed across sessions.
@@ -234,6 +276,10 @@ def get_highest_spenders(
             SessionParticipant,
             SessionParticipant.user_id == User.id,
         )
+        .join(
+            DrinkSession,
+            DrinkSession.id == SessionParticipant.session_id,
+        )
         .where(
             User.is_active.is_(True)
         )
@@ -248,6 +294,8 @@ def get_highest_spenders(
         )
         .limit(limit)
     )
+    if handler_id is not None:
+        stmt = stmt.where(DrinkSession.handler_id == handler_id)
 
     rows = db.execute(stmt).all()
 
@@ -263,15 +311,21 @@ def get_highest_spenders(
 
 def get_admin_analytics(
     db: Session,
+    current_user: User | None = None,
 ) -> dict:
     """
     Return the complete dataset required by the admin dashboard.
     """
 
-    users = get_admin_user_balances(db)
+    handler_id = (
+        current_user.id
+        if current_user is not None and current_user.role == UserRole.ADMIN
+        else None
+    )
+    users = get_admin_user_balances(db, handler_id=handler_id)
 
     return {
-        "summary": get_admin_summary(db),
+        "summary": get_admin_summary(db, handler_id=handler_id),
         "users": users,
         "highest_debt_users": sorted(
             users,
@@ -281,5 +335,6 @@ def get_admin_analytics(
         "highest_spenders": get_highest_spenders(
             db,
             limit=5,
+            handler_id=handler_id,
         ),
     }

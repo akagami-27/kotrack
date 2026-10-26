@@ -5,6 +5,8 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
 import { apiRequest } from '../api/client'
 
+type Handler = { id: number; name: string }
+
 type User = {
   id: number
   name: string
@@ -25,6 +27,8 @@ export default function RequestSession() {
   const [note, setNote] = useState('')
 
   const [users, setUsers] = useState<User[]>([])
+  const [handlers, setHandlers] = useState<Handler[]>([])
+  const [handlerId, setHandlerId] = useState('')
   const [selectedParticipantIds, setSelectedParticipantIds] = useState<number[]>([])
   const selectedUserIds =
     user && !selectedParticipantIds.includes(user.id)
@@ -41,11 +45,15 @@ export default function RequestSession() {
   useEffect(() => {
     async function loadUsers() {
       try {
-        const data = await apiRequest<User[]>('/api/users')
+        const [data, eligibleHandlers] = await Promise.all([
+          apiRequest<User[]>('/api/users'),
+          apiRequest<Handler[]>('/api/users/session-handlers'),
+        ])
 
         setUsers(
           data.filter((account) => account.is_active),
         )
+        setHandlers(eligibleHandlers)
       } catch (err) {
         setError(
           err instanceof Error
@@ -125,6 +133,7 @@ export default function RequestSession() {
               packets_used: packetAmount,
               participant_user_ids: selectedUserIds,
               note: note.trim() || null,
+              handler_id: handlerId ? Number(handlerId) : null,
             }),
           },
         )
@@ -397,11 +406,11 @@ export default function RequestSession() {
 
             <form
               onSubmit={handleSubmit}
-              className="rounded-3xl border border-white/[0.07] bg-white/[0.025] p-6 backdrop-blur-xl sm:p-8"
+              className="min-w-0 rounded-3xl border border-white/[0.07] bg-white/[0.025] p-4 backdrop-blur-xl sm:p-8"
             >
-              <div className="grid gap-6 sm:grid-cols-2">
+              <div className="grid min-w-0 gap-5 sm:grid-cols-2 sm:gap-6">
                 {/* Date */}
-                <div>
+                <div className="min-w-0">
                   <label
                     htmlFor="session-date"
                     className="mb-2 block text-xs font-medium text-white/55"
@@ -418,12 +427,12 @@ export default function RequestSession() {
                     }
                     required
                     disabled={submitting}
-                    className="w-full rounded-xl border border-white/[0.08] bg-black/20 px-4 py-3 text-sm text-white outline-none transition focus:border-white/20 disabled:opacity-50"
+                    className="block min-h-12 w-full min-w-0 max-w-full rounded-xl border border-white/[0.08] bg-black/20 px-3 py-3 text-base text-white outline-none transition focus:border-white/20 disabled:opacity-50 sm:px-4 sm:text-sm"
                   />
                 </div>
 
                 {/* Packets */}
-                <div>
+                <div className="min-w-0">
                   <label
                     htmlFor="packets"
                     className="mb-2 block text-xs font-medium text-white/55"
@@ -442,7 +451,7 @@ export default function RequestSession() {
                     }
                     required
                     disabled={submitting}
-                    className="w-full rounded-xl border border-white/[0.08] bg-black/20 px-4 py-3 text-sm text-white outline-none transition focus:border-white/20 disabled:opacity-50"
+                    className="block min-h-12 w-full min-w-0 max-w-full rounded-xl border border-white/[0.08] bg-black/20 px-3 py-3 text-base text-white outline-none transition focus:border-white/20 disabled:opacity-50 sm:px-4 sm:text-sm"
                   />
 
                   <p className="mt-2 text-[10px] text-white/20">
@@ -451,7 +460,28 @@ export default function RequestSession() {
                 </div>
 
                 {/* Participants */}
-                <div className="sm:col-span-2">
+                <div className="min-w-0 sm:col-span-2">
+                  <label htmlFor="session-handler" className="mb-2 block text-xs font-medium text-white/55">
+                    Session handler
+                  </label>
+                  <select
+                    id="session-handler"
+                    value={handlerId}
+                    onChange={(event) => setHandlerId(event.target.value)}
+                    disabled={submitting}
+                    className="block min-h-12 w-full min-w-0 max-w-full rounded-xl border border-white/[0.08] bg-[#0b0d15] px-3 text-base text-white outline-none focus:border-white/20 disabled:opacity-50 sm:text-sm"
+                  >
+                    <option value="">Unassigned</option>
+                    {handlers.map((handler) => (
+                      <option key={handler.id} value={handler.id}>{handler.name}</option>
+                    ))}
+                  </select>
+                  <p className="mt-2 text-[10px] text-white/30">
+                    Choose an active administrator to handle the request.
+                  </p>
+                </div>
+
+                <div className="min-w-0 sm:col-span-2">
                   <div className="mb-3 flex items-center justify-between">
                     <label className="block text-xs font-medium text-white/55">
                       Participants
@@ -462,7 +492,7 @@ export default function RequestSession() {
                     </span>
                   </div>
 
-                  <div className="rounded-2xl border border-white/[0.07] bg-black/10 p-3">
+                  <div className="max-h-[min(22rem,42dvh)] min-w-0 overflow-y-auto overscroll-contain rounded-2xl border border-white/[0.07] bg-black/10 p-2 sm:p-3">
                     {loadingUsers ? (
                       <div className="px-3 py-5 text-center text-xs text-white/30">
                         Loading users...
@@ -491,7 +521,7 @@ export default function RequestSession() {
                                 submitting ||
                                 isCurrentUser
                               }
-                              className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition ${
+                              className={`flex min-h-12 w-full min-w-0 items-center justify-between gap-3 rounded-xl border px-3 py-3 text-left transition sm:px-4 ${
                                 selected
                                   ? 'border-white/20 bg-white/[0.07]'
                                   : 'border-white/[0.05] bg-white/[0.015] hover:bg-white/[0.04]'
@@ -501,15 +531,15 @@ export default function RequestSession() {
                                   : ''
                               } disabled:opacity-70`}
                             >
-                              <div className="flex items-center gap-3">
+                              <div className="flex min-w-0 items-center gap-3">
                                 <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/[0.06] text-xs font-semibold text-white/60">
                                   {account.name
                                     .charAt(0)
                                     .toUpperCase()}
                                 </div>
 
-                                <div>
-                                  <p className="text-sm text-white/70">
+                                <div className="min-w-0">
+                                  <p className="break-words text-sm text-white/70">
                                     {account.name}
                                   </p>
 
@@ -568,7 +598,7 @@ export default function RequestSession() {
                     rows={4}
                     placeholder="Add any useful information for the administrator..."
                     disabled={submitting}
-                    className="w-full resize-none rounded-xl border border-white/[0.08] bg-black/20 px-4 py-3 text-sm text-white placeholder:text-white/15 outline-none transition focus:border-white/20 disabled:opacity-50"
+                    className="block min-h-28 w-full min-w-0 max-w-full resize-none rounded-xl border border-white/[0.08] bg-black/20 px-3 py-3 text-base text-white placeholder:text-white/15 outline-none transition focus:border-white/20 disabled:opacity-50 sm:px-4 sm:text-sm"
                   />
                 </div>
               </div>

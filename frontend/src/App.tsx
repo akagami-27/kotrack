@@ -9,6 +9,7 @@ import {
 import { useAuth } from './auth/useAuth'
 
 import AdminRoute from './components/AdminRoute'
+import SuperAdminRoute from './components/SuperAdminRoute'
 
 const AdminCreateSessions = lazy(
   () => import('./pages/AdminCreateSessions'),
@@ -45,6 +46,9 @@ const Sessions = lazy(
 )
 const Settings = lazy(
   () => import('./pages/Settings'),
+)
+const SuperAdminUsers = lazy(
+  () => import('./pages/SuperAdminUsers'),
 )
 
 function App() {
@@ -232,6 +236,16 @@ function App() {
           <AdminRoute>
             <AdminPayments />
           </AdminRoute>
+        }
+      />
+
+      {/* Super-admin user management */}
+      <Route
+        path="/admin/users"
+        element={
+          <SuperAdminRoute>
+            <SuperAdminUsers />
+          </SuperAdminRoute>
         }
       />
 

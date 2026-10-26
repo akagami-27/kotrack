@@ -33,7 +33,7 @@ def get_admin_analytics_endpoint(
     Return financial and usage analytics for the admin dashboard.
     """
 
-    return get_admin_analytics(db)
+    return get_admin_analytics(db, current_user=current_user)
 
 
 # ============================================================================

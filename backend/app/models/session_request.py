@@ -7,6 +7,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    func,
     Integer,
     Numeric,
     String,
@@ -60,7 +61,7 @@ class SessionRequest(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        server_default="now()",
+        server_default=func.now(),
     )
 
     reviewed_at: Mapped[datetime | None] = mapped_column(
@@ -76,6 +77,12 @@ class SessionRequest(Base):
         nullable=True,
     )
 
+    handler_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     requester: Mapped["User"] = relationship(
         "User",
         foreign_keys=[requested_by],
@@ -86,6 +93,11 @@ class SessionRequest(Base):
         foreign_keys=[reviewed_by],
     )
 
+    handler: Mapped["User | None"] = relationship(
+        "User",
+        foreign_keys=[handler_id],
+    )
+
     participants: Mapped[
         list["SessionRequestParticipant"]
     ] = relationship(
@@ -93,3 +105,7 @@ class SessionRequest(Base):
         back_populates="request",
         cascade="all, delete-orphan",
     )
+
+    @property
+    def handler_name(self) -> str | None:
+        return self.handler.name if self.handler is not None else None

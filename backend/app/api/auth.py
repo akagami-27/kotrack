@@ -68,6 +68,7 @@ def register(
             db,
             name=user_data.name,
             password=user_data.password,
+            email=user_data.email,
         )
 
         db.commit()

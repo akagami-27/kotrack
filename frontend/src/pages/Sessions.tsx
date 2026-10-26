@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 
 import { apiRequest } from '../api/client'
 import { useAuth } from '../auth/useAuth'
+import { isAdminRole, isSuperAdminRole } from '../auth/roles'
 
 type SessionParticipant = {
   id: number
@@ -16,6 +17,8 @@ type UserDirectoryEntry = {
   id: number
   name: string
   avatar_data: string | null
+  role: string
+  is_active: boolean
 }
 
 type DrinkSession = {
@@ -25,6 +28,8 @@ type DrinkSession = {
   price_per_packet: string | number
   total_cost: string | number
   created_by: number
+  handler_id: number | null
+  handler_name: string | null
   created_at: string
   participants: SessionParticipant[]
 }
@@ -78,7 +83,8 @@ export default function Sessions() {
     useState<number | null>(null)
 
   const currentUserId = user?.id
-  const isAdmin = user?.role === 'ADMIN'
+  const isAdmin = isAdminRole(user?.role)
+  const isSuperAdmin = isSuperAdminRole(user?.role)
 
   useEffect(() => {
     let cancelled = false
@@ -360,19 +366,21 @@ export default function Sessions() {
             sessions.length === 0 && (
               <section className="mt-4 rounded-xl border border-white/[0.07] bg-white/[0.025] p-6 text-center sm:mt-5 sm:rounded-2xl sm:p-8">
                 <p className="text-sm font-medium text-white/60">
-                  No sessions yet
+                  {isAdmin && !isSuperAdmin ? 'No sessions assigned to you yet' : 'No sessions yet'}
                 </p>
 
                 <p className="mt-1.5 text-[10px] text-white/30 sm:text-xs">
-                  Create a session to see it here.
+                  {isAdmin && !isSuperAdmin
+                    ? 'A super admin can assign sessions to your account.'
+                    : 'Create a session to see it here.'}
                 </p>
 
-                <Link
+                {!isAdmin && <Link
                   to="/sessions/new"
                   className="mt-4 inline-flex rounded-xl bg-white px-4 py-2.5 text-xs font-semibold text-black"
                 >
                   Create session
-                </Link>
+                </Link>}
               </section>
             )}
 
@@ -560,6 +568,9 @@ function SessionCard({
             <p className="mt-0.5 truncate text-[8px] text-white/25 sm:text-[9px]">
               {formatDate(session.session_date)}
             </p>
+            <p className="mt-0.5 truncate text-[8px] text-cyan-100/35 sm:text-[9px]">
+              Handler: {session.handler_name || 'Unassigned'}
+            </p>
           </div>
         </div>
 
@@ -723,6 +734,9 @@ function SessionDetails({
 
             <p className="mt-1 text-[10px] text-white/30 sm:text-xs">
               {formatDate(session.session_date)}
+            </p>
+            <p className="mt-1 text-[10px] text-cyan-100/50 sm:text-xs">
+              Handler: {session.handler_name || 'Unassigned'}
             </p>
           </div>
 
@@ -1015,6 +1029,10 @@ function EditSessionModal({
       ),
     )
 
+  const [handlerId, setHandlerId] = useState(
+    session.handler_id ? String(session.handler_id) : '',
+  )
+
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -1064,6 +1082,7 @@ function EditSessionModal({
               packets_used: packetValue,
               participant_user_ids:
                 participants,
+              handler_id: handlerId ? Number(handlerId) : null,
             }),
           },
         )
@@ -1081,17 +1100,28 @@ function EditSessionModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm">
-      <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-white/[0.09] bg-[#0b0e18] p-4 shadow-2xl sm:rounded-3xl sm:p-6">
+    <div
+      className="fixed inset-0 z-50 flex min-h-0 items-center justify-center bg-black/75 p-2 backdrop-blur-sm sm:p-4"
+      style={{
+        paddingTop: 'max(0.5rem, env(safe-area-inset-top))',
+        paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))',
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="edit-session-title"
+        className="flex max-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-1rem)] w-full min-w-0 max-w-lg flex-col overflow-hidden rounded-2xl border border-white/[0.09] bg-[#0b0e18] shadow-2xl sm:rounded-3xl"
+      >
         {/* MODAL HEADER */}
 
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex shrink-0 items-start justify-between gap-3 px-4 pb-3 pt-4 sm:px-6 sm:pt-6">
           <div>
             <p className="text-[9px] uppercase tracking-[0.16em] text-white/25">
               Session management
             </p>
 
-            <h3 className="mt-1 text-lg font-semibold sm:text-xl">
+            <h3 id="edit-session-title" className="mt-1 text-lg font-semibold sm:text-xl">
               Edit session
             </h3>
           </div>
@@ -1101,7 +1131,7 @@ function EditSessionModal({
             onClick={onClose}
             disabled={saving}
             aria-label="Close"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-lg text-white/30 hover:bg-white/[0.05] hover:text-white"
+            className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-xs text-white/50 hover:bg-white/[0.05] hover:text-white"
           >
             ×
           </button>
@@ -1110,18 +1140,19 @@ function EditSessionModal({
         {/* ERROR */}
 
         {error && (
-          <div className="mt-4 rounded-xl border border-red-400/10 bg-red-400/[0.05] px-3 py-2.5 text-xs text-red-300">
+          <div role="alert" className="mx-4 mb-2 shrink-0 rounded-xl border border-red-400/10 bg-red-400/[0.05] px-3 py-2.5 text-xs text-red-300 sm:mx-6">
             {error}
           </div>
         )}
 
         <form
           onSubmit={submit}
-          className="mt-5 space-y-3.5"
+          className="flex min-h-0 flex-1 flex-col px-4 pb-3 sm:px-6 sm:pb-5"
         >
           {/* DATE */}
 
-          <label className="block">
+          <div className="grid min-w-0 shrink-0 gap-3 sm:grid-cols-2">
+          <label className="block min-w-0 sm:col-span-2">
             <span className="mb-1.5 block text-[11px] text-white/45">
               Session date
             </span>
@@ -1136,13 +1167,13 @@ function EditSessionModal({
               }
               required
               disabled={saving}
-              className="min-h-10 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-xs text-white outline-none focus:border-white/25 disabled:opacity-50"
+              className="block min-h-11 w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-base text-white outline-none focus:border-white/25 disabled:opacity-50 sm:text-sm"
             />
           </label>
 
           {/* PACKETS */}
 
-          <label className="block">
+          <label className="block min-w-0">
             <span className="mb-1.5 block text-[11px] text-white/45">
               Packets used
             </span>
@@ -1159,7 +1190,7 @@ function EditSessionModal({
               }
               required
               disabled={saving}
-              className="min-h-10 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-xs text-white outline-none focus:border-white/25 disabled:opacity-50"
+              className="block min-h-11 w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-base text-white outline-none focus:border-white/25 disabled:opacity-50 sm:text-sm"
             />
 
             <p className="mt-1.5 text-[10px] leading-4 text-white/25">
@@ -1172,9 +1203,25 @@ function EditSessionModal({
             </p>
           </label>
 
+          <label className="block min-w-0">
+            <span className="mb-1.5 block text-[11px] text-white/45">Session handler</span>
+            <select
+              value={handlerId}
+              onChange={(event) => setHandlerId(event.target.value)}
+              disabled={saving}
+              className="block min-h-11 w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-[#0b0d15] px-2 text-base text-white outline-none focus:border-white/25 disabled:opacity-50 sm:px-3 sm:text-sm"
+            >
+              <option value="">Unassigned</option>
+              {users.filter((account) => account.is_active && isAdminRole(account.role)).map((account) => (
+                <option key={account.id} value={account.id}>{account.name}</option>
+              ))}
+            </select>
+          </label>
+          </div>
+
           {/* PARTICIPANTS */}
 
-          <div>
+          <div className="mt-3 flex min-h-0 flex-1 flex-col">
             <div className="mb-1.5 flex items-center justify-between">
               <p className="text-[11px] text-white/45">
                 Participants
@@ -1186,8 +1233,8 @@ function EditSessionModal({
               </span>
             </div>
 
-            <div className="max-h-48 overflow-y-auto rounded-xl border border-white/[0.07] bg-black/20 p-1.5">
-              {users.map((account) => {
+            <div className="min-h-16 max-h-[35dvh] min-w-0 flex-1 overflow-y-auto overscroll-contain rounded-xl border border-white/[0.07] bg-black/20 p-1.5">
+              {users.filter((account) => account.is_active).map((account) => {
                 const checked =
                   participants.includes(
                     account.id,
@@ -1196,7 +1243,7 @@ function EditSessionModal({
                 return (
                   <label
                     key={account.id}
-                    className="flex min-h-9 cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-[11px] text-white/60 hover:bg-white/[0.04]"
+                    className="flex min-h-11 min-w-0 cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-[11px] text-white/60 hover:bg-white/[0.04]"
                   >
                     <input
                       type="checkbox"
@@ -1207,10 +1254,10 @@ function EditSessionModal({
                           account.id,
                         )
                       }
-                      className="h-4 w-4"
+                      className="h-4 w-4 shrink-0"
                     />
 
-                    <span className="truncate">
+                    <span className="min-w-0 flex-1 break-words">
                       {account.name}
                     </span>
                   </label>
@@ -1221,12 +1268,12 @@ function EditSessionModal({
 
           {/* ACTIONS */}
 
-          <div className="grid grid-cols-2 gap-2 pt-1">
+          <div className="grid shrink-0 grid-cols-2 gap-2 pt-3">
             <button
               type="button"
               onClick={onClose}
               disabled={saving}
-              className="min-h-10 rounded-xl border border-white/10 px-3 py-2 text-xs text-white/50 hover:bg-white/[0.05] hover:text-white disabled:opacity-40"
+              className="min-h-11 min-w-0 rounded-xl border border-white/10 px-2 py-2 text-[11px] text-white/50 hover:bg-white/[0.05] hover:text-white disabled:opacity-40 sm:px-3 sm:text-xs"
             >
               Cancel
             </button>
@@ -1237,7 +1284,7 @@ function EditSessionModal({
                 saving ||
                 participants.length === 0
               }
-              className="min-h-10 rounded-xl bg-white px-3 py-2 text-xs font-semibold text-black hover:bg-white/90 disabled:opacity-40"
+              className="min-h-11 min-w-0 rounded-xl bg-white px-2 py-2 text-[11px] font-semibold text-black hover:bg-white/90 disabled:opacity-40 sm:px-3 sm:text-xs"
             >
               {saving
                 ? 'Saving...'

@@ -14,7 +14,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.enums import UserRole
+from app.models.enums import is_admin_role
 from app.models.session_request import SessionRequest
 from app.models.session_request_participant import (
     SessionRequestParticipant,
@@ -177,7 +177,7 @@ def approve_session_request(
             "Administrator is inactive"
         )
 
-    if admin.role != UserRole.ADMIN:
+    if not is_admin_role(admin.role):
         raise ValueError(
             "Only administrators can approve session requests"
         )
@@ -199,6 +199,7 @@ def approve_session_request(
             packets_used=request.packets_used,
             participant_user_ids=participant_user_ids,
             created_by=admin_user_id,
+            handler_id=request.handler_id,
             commit=False,
         )
 
@@ -241,7 +242,7 @@ def reject_session_request(
             "Administrator is inactive"
         )
 
-    if admin.role != UserRole.ADMIN:
+    if not is_admin_role(admin.role):
         raise ValueError(
             "Only administrators can reject session requests"
         )

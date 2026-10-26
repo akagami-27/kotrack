@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { Navigate } from 'react-router-dom'
 
 import { useAuth } from '../auth/useAuth'
+import { isAdminRole } from '../auth/roles'
 
 type AdminRouteProps = {
   children: ReactNode
@@ -31,7 +32,7 @@ export default function AdminRoute({
     )
   }
 
-  if (user.role !== 'ADMIN') {
+  if (!isAdminRole(user.role)) {
     return (
       <Navigate
         to="/dashboard"

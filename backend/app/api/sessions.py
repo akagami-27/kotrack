@@ -44,6 +44,7 @@ from app.services.session_service import (
     delete_drink_session,
     update_drink_session,
 )
+from app.services.session_access import visible_sessions_for
 
 
 router = APIRouter(
@@ -117,11 +118,13 @@ def create_session(
             ),
             created_by=current_user.id,
             price_per_packet=price_per_packet,
+            handler_id=session_data.handler_id,
         )
 
         drink_session = db.scalar(
             select(DrinkSession)
             .options(
+                selectinload(DrinkSession.handler),
                 selectinload(
                     DrinkSession.participants
                 ).selectinload(
@@ -161,49 +164,28 @@ def list_sessions(
     """
     Return drink sessions.
 
-    ADMIN:
+    SUPER_ADMIN:
         All sessions.
+
+    ADMIN:
+        Only sessions assigned to the authenticated administrator.
 
     USER:
         Only sessions they participated in.
     """
 
-    if current_user.role == UserRole.ADMIN:
-        stmt = (
-            select(DrinkSession)
-            .options(
-                selectinload(
-                    DrinkSession.participants
-                ).selectinload(
-                    SessionParticipant.user
-                )
-            )
-            .order_by(
-                DrinkSession.session_date.desc()
-            )
-        )
-
-        return list(
-            db.scalars(stmt).unique().all()
-        )
-
     stmt = (
         select(DrinkSession)
         .options(
+            selectinload(DrinkSession.handler),
             selectinload(
                 DrinkSession.participants
             ).selectinload(
                 SessionParticipant.user
             )
         )
-        .join(
-            SessionParticipant,
-            SessionParticipant.session_id
-            == DrinkSession.id,
-        )
         .where(
-            SessionParticipant.user_id
-            == current_user.id
+            visible_sessions_for(current_user)
         )
         .order_by(
             DrinkSession.session_date.desc()
@@ -232,8 +214,11 @@ def get_session(
     """
     Return a single drink session.
 
-    ADMIN:
+    SUPER_ADMIN:
         Can view any session.
+
+    ADMIN:
+        Can view only sessions assigned to the authenticated administrator.
 
     USER:
         Can only view sessions they participated in.
@@ -242,6 +227,7 @@ def get_session(
     stmt = (
         select(DrinkSession)
         .options(
+            selectinload(DrinkSession.handler),
             selectinload(
                 DrinkSession.participants
             ).selectinload(
@@ -249,31 +235,14 @@ def get_session(
             )
         )
         .where(
-            DrinkSession.id == session_id
+            DrinkSession.id == session_id,
+            visible_sessions_for(current_user),
         )
     )
 
     drink_session = db.scalar(stmt)
 
     if drink_session is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Drink session not found",
-        )
-
-    if current_user.role == UserRole.ADMIN:
-        return drink_session
-
-    participant = db.scalar(
-        select(SessionParticipant).where(
-            SessionParticipant.session_id
-            == session_id,
-            SessionParticipant.user_id
-            == current_user.id,
-        )
-    )
-
-    if participant is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Drink session not found",
@@ -300,8 +269,11 @@ def update_session(
     """
     Update an existing drink session.
 
-    ADMIN:
+    SUPER_ADMIN:
         Can edit any session at any time.
+
+    ADMIN:
+        Can edit only sessions assigned to the authenticated administrator.
 
     USER:
         Can edit only sessions they created,
@@ -313,6 +285,7 @@ def update_session(
     stmt = (
         select(DrinkSession)
         .options(
+            selectinload(DrinkSession.handler),
             selectinload(
                 DrinkSession.participants
             ).selectinload(
@@ -324,6 +297,8 @@ def update_session(
         )
     )
 
+    if current_user.role in {UserRole.ADMIN, UserRole.SUPER_ADMIN}:
+        stmt = stmt.where(visible_sessions_for(current_user))
     drink_session = db.scalar(stmt)
 
     if drink_session is None:
@@ -345,6 +320,10 @@ def update_session(
             price_per_packet=(
                 session_data.price_per_packet
             ),
+            handler_id=session_data.handler_id,
+            update_handler=(
+                "handler_id" in session_data.model_fields_set
+            ),
         )
 
         db.commit()
@@ -354,6 +333,7 @@ def update_session(
         drink_session = db.scalar(
             select(DrinkSession)
             .options(
+                selectinload(DrinkSession.handler),
                 selectinload(
                     DrinkSession.participants
                 ).selectinload(
@@ -401,19 +381,21 @@ def delete_session(
     """
     Delete an existing drink session.
 
-    ADMIN:
+    SUPER_ADMIN:
         Can delete any session at any time.
+
+    ADMIN:
+        Can delete only sessions assigned to the authenticated administrator.
 
     USER:
         Can delete only sessions they created,
         and only within 3 days of the session date.
     """
 
-    drink_session = db.scalar(
-        select(DrinkSession).where(
-            DrinkSession.id == session_id
-        )
-    )
+    stmt = select(DrinkSession).where(DrinkSession.id == session_id)
+    if current_user.role in {UserRole.ADMIN, UserRole.SUPER_ADMIN}:
+        stmt = stmt.where(visible_sessions_for(current_user))
+    drink_session = db.scalar(stmt)
 
     if drink_session is None:
         raise HTTPException(
