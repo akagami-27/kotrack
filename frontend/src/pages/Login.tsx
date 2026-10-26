@@ -135,7 +135,7 @@ export default function Login() {
     'flex min-h-11 w-full items-center justify-center rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-[#070910] outline-none transition-[background-color,box-shadow,transform] duration-150 ease-out hover:bg-white/90 hover:shadow-[0_6px_18px_rgba(255,255,255,0.08)] active:scale-[0.99] focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#070910] disabled:cursor-not-allowed disabled:opacity-50'
 
   return (
-    <main className="login-page min-h-[100dvh] bg-[#070910] px-4 py-6 text-white sm:px-6 sm:py-10">
+    <main className="login-page min-h-[100dvh] bg-[#070910] px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(1.5rem,env(safe-area-inset-top))] text-white sm:px-6 sm:py-10">
       <style>{`
         @keyframes kotrack-page-enter {
           from {

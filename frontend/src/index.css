@@ -95,3 +95,16 @@ textarea,
 select {
   -webkit-tap-highlight-color: transparent;
 }
+
+/* Keep native form controls from triggering iOS Safari's focus zoom. */
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+
+  button {
+    min-height: 44px;
+  }
+}

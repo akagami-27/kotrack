@@ -5,11 +5,11 @@ Users can submit and view their own payments.
 Administrators can review, confirm, reject, and download receipts.
 
 Receipt files:
-- Any file type is accepted.
+- JPEG, PNG, WebP, HEIC/HEIF, and PDF files are accepted.
 - Maximum file size: 25 MB.
 - Receipt bytes are stored in the database.
 - SHA-256 is stored for integrity verification.
-- Uploaded files are never executed by the application.
+- The server identifies supported types from file signatures.
 
 Business rules are handled by app.services.payment_service.
 """
@@ -41,6 +41,7 @@ from app.services.payment_service import (
     create_payment,
     reject_payment,
 )
+from app.services.upload_validation import detect_receipt_content_type
 
 
 router = APIRouter(
@@ -162,13 +163,16 @@ async def submit_payment(
 
     receipt_data = b"".join(receipt_chunks)
 
-    receipt_hash = sha256.hexdigest()
+    content_type = detect_receipt_content_type(receipt_data)
+    if content_type is None:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=(
+                "Receipt must be a JPEG, PNG, WebP, HEIC/HEIF, or PDF file"
+            ),
+        )
 
-    content_type = (
-        receipt.content_type
-        if receipt.content_type
-        else "application/octet-stream"
-    )
+    receipt_hash = sha256.hexdigest()
 
     # ------------------------------------------------------------------------
     # Create payment

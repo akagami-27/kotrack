@@ -12,6 +12,7 @@ from app.schemas.user import (
 )
 from app.services.user_service import (
     change_password,
+    remove_user_avatar,
     update_user_profile,
 )
 
@@ -57,6 +58,12 @@ def update_my_profile(
             name=profile_data.name,
             avatar_data=profile_data.avatar_data,
         )
+
+        if (
+            "avatar_data" in profile_data.model_fields_set
+            and profile_data.avatar_data is None
+        ):
+            user = remove_user_avatar(db, user=user)
 
         db.commit()
         db.refresh(user)

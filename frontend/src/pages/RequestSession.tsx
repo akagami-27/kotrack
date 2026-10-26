@@ -145,9 +145,9 @@ export default function RequestSession() {
   if (submitted) {
     return (
       <main
-        className="min-h-screen bg-[#070910] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-white"
+        className="min-h-[100dvh] bg-[#070910] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-white"
       >
-        <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-5">
+        <div className="relative flex min-h-[100dvh] items-center justify-center overflow-hidden px-5">
           <div className="pointer-events-none absolute inset-0">
             <div className="absolute left-1/2 top-1/2 h-[500px] w-[500px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-violet-600/[0.06] blur-[150px]" />
           </div>
@@ -247,9 +247,9 @@ export default function RequestSession() {
 
   return (
     <main
-      className="min-h-screen bg-[#070910] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-white"
+      className="min-h-[100dvh] bg-[#070910] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-white"
     >
-      <div className="flex min-h-screen">
+      <div className="flex min-h-[100dvh]">
         {/* Sidebar */}
         <aside className="hidden w-64 shrink-0 border-r border-white/[0.06] lg:flex lg:flex-col">
           <div className="flex h-20 items-center border-b border-white/[0.06] px-6">

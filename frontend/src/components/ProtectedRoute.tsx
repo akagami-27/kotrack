@@ -11,7 +11,7 @@ export default function ProtectedRoute({
 
   if (loading) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#070910] text-white">
+      <main role="status" aria-live="polite" className="flex min-h-[100dvh] items-center justify-center bg-[#070910] pb-[env(safe-area-inset-bottom)] pt-[max(1rem,env(safe-area-inset-top))] text-white">
         <div className="text-sm text-white/40">
           Loading KoTrack...
         </div>

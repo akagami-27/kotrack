@@ -1,37 +1,84 @@
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { lazy, Suspense } from 'react'
+import {
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+} from 'react-router-dom'
 
 import { useAuth } from './auth/useAuth'
 
 import AdminRoute from './components/AdminRoute'
 
-import AdminCreateSessions from './pages/AdminCreateSessions'
-import AdminDashboard from './pages/AdminDashboard'
-import AdminPayments from './pages/AdminPayments'
-
-import Dashboard from './pages/Dashboard'
-import Landing from './pages/Landing'
-import Login from './pages/Login'
-import Payments from './pages/Payments'
-import Profile from './pages/Profile'
-import Register from './pages/Register'
-import RequestSession from './pages/RequestSession'
-import Sessions from './pages/Sessions'
-import Settings from './pages/Settings'
+const AdminCreateSessions = lazy(
+  () => import('./pages/AdminCreateSessions'),
+)
+const AdminDashboard = lazy(
+  () => import('./pages/AdminDashboard'),
+)
+const AdminPayments = lazy(
+  () => import('./pages/AdminPayments'),
+)
+const Dashboard = lazy(
+  () => import('./pages/Dashboard'),
+)
+const Landing = lazy(
+  () => import('./pages/Landing'),
+)
+const Login = lazy(
+  () => import('./pages/Login'),
+)
+const Payments = lazy(
+  () => import('./pages/Payments'),
+)
+const Profile = lazy(
+  () => import('./pages/Profile'),
+)
+const Register = lazy(
+  () => import('./pages/Register'),
+)
+const RequestSession = lazy(
+  () => import('./pages/RequestSession'),
+)
+const Sessions = lazy(
+  () => import('./pages/Sessions'),
+)
+const Settings = lazy(
+  () => import('./pages/Settings'),
+)
 
 function App() {
   const { user, loading } = useAuth()
+  const { pathname } = useLocation()
 
-  if (loading) {
+  if (loading && pathname !== '/') {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#070910] text-white">
+      <main
+        role="status"
+        aria-live="polite"
+        className="flex min-h-[100dvh] items-center justify-center bg-[#070910] text-white"
+      >
         <div className="text-sm text-white/40">
           Loading KoTrack...
         </div>
-      </div>
+      </main>
     )
   }
 
   return (
+    <Suspense
+      fallback={
+        <main
+          role="status"
+          aria-live="polite"
+          className="flex min-h-[100dvh] items-center justify-center bg-[#070910] text-white"
+        >
+          <p className="text-sm text-white/40">
+            Loading page...
+          </p>
+        </main>
+      }
+    >
     <Routes>
       {/* Public landing page */}
       <Route
@@ -209,6 +256,7 @@ function App() {
         }
       />
     </Routes>
+    </Suspense>
   )
 }
 
