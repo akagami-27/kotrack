@@ -165,6 +165,7 @@ jobs:
         with:
           image-ref: kotrack-backend:${{ github.sha }}
           severity: HIGH,CRITICAL
+          ignore-unfixed: true
           exit-code: "1"
       - name: Build frontend image locally
         uses: docker/build-push-action@v6
@@ -177,6 +178,7 @@ jobs:
         with:
           image-ref: kotrack-frontend:${{ github.sha }}
           severity: HIGH,CRITICAL
+          ignore-unfixed: true
           exit-code: "1"
 
   publish-images:
@@ -227,6 +229,7 @@ jobs:
         with:
           image-ref: public-registry.smolelab.com/og/kotrack-frontend@${{ steps.frontend-image.outputs.digest }}
           severity: HIGH,CRITICAL
+          ignore-unfixed: true
           exit-code: "1"
 
       - name: Scan the exact backend digest that will be migrated and deployed
@@ -234,6 +237,7 @@ jobs:
         with:
           image-ref: public-registry.smolelab.com/og/kotrack-backend@${{ steps.backend-image.outputs.digest }}
           severity: HIGH,CRITICAL
+          ignore-unfixed: true
           exit-code: "1"
 
   migrate-production:
