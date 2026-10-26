@@ -31,6 +31,8 @@ from app.services.financial import (
     calculate_session_total,
     split_session_cost,
 )
+from app.services.session_handler_service import validate_session_handler
+from app.services.session_access import admin_can_access_session
 
 
 USER_SESSION_EDIT_DAYS = 3
@@ -105,17 +107,25 @@ def _can_modify_session(
     """
     Determine whether the current user can modify a session.
 
-    ADMIN:
+    SUPER_ADMIN:
         Can modify any session at any time.
+
+    ADMIN:
+        Can modify only sessions assigned to that administrator.
 
     USER:
         Can modify only sessions they created,
         and only within 3 days of the session date.
     """
 
-    # Admins can always modify sessions.
-    if current_user.role == UserRole.ADMIN:
-        return True
+    if current_user.role in {UserRole.ADMIN, UserRole.SUPER_ADMIN}:
+        return admin_can_access_session(session, current_user)
+
+    if (
+        session.creator_role_at_creation is not None
+        and session.creator_role_at_creation != UserRole.USER.value
+    ):
+        return False
 
     # Normal users can only modify sessions they created.
     if session.created_by != current_user.id:
@@ -142,6 +152,7 @@ def create_drink_session(
     packets_used: Decimal,
     participant_user_ids: list[int],
     created_by: int,
+    handler_id: int | None = None,
     price_per_packet: Decimal = DEFAULT_PRICE_PER_PACKET,
     commit: bool = True,
 ) -> DrinkSession:
@@ -187,6 +198,7 @@ def create_drink_session(
         db,
         participant_user_ids,
     )
+    validate_session_handler(db, handler_id)
 
     total_cost = calculate_session_total(
         packets_used,
@@ -204,6 +216,8 @@ def create_drink_session(
         price_per_packet=Decimal(price_per_packet),
         total_cost=total_cost,
         created_by=created_by,
+        creator_role_at_creation=creator.role.value,
+        handler_id=handler_id,
     )
 
     drink_session.participants = [
@@ -239,6 +253,8 @@ def update_drink_session(
     packets_used: Decimal | None = None,
     participant_user_ids: list[int] | None = None,
     price_per_packet: Decimal | None = None,
+    handler_id: int | None = None,
+    update_handler: bool = False,
 ) -> DrinkSession:
     """
     Update an existing drink session.
@@ -301,6 +317,9 @@ def update_drink_session(
         participant_user_ids,
     )
 
+    if update_handler:
+        validate_session_handler(db, handler_id)
+
     # Recalculate all financial values server-side.
     total_cost = calculate_session_total(
         new_packets_used,
@@ -317,6 +336,8 @@ def update_drink_session(
     drink_session.packets_used = new_packets_used
     drink_session.price_per_packet = new_price_per_packet
     drink_session.total_cost = total_cost
+    if update_handler:
+        drink_session.handler_id = handler_id
 
     # IMPORTANT:
     # Do NOT replace drink_session.participants with a new list.

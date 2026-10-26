@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 
 import { apiRequest } from '../api/client'
 import { useAuth } from '../auth/useAuth'
+import { isAdminRole, isSuperAdminRole } from '../auth/roles'
 
 type UserProfile = {
   id: number
@@ -34,6 +35,8 @@ type DrinkSession = {
   total_cost: string | number
   created_by: number
   created_at: string
+  handler_id: number | null
+  handler_name: string | null
   participants: SessionParticipant[]
 }
 
@@ -127,10 +130,12 @@ export default function Dashboard() {
 
   const userSessions = sessions
     .filter((session) =>
-      session.participants.some(
-        (participant) =>
-          participant.user_id === currentUserId,
-      ),
+      isAdminRole(user?.role)
+        ? true
+        : session.participants.some(
+            (participant) =>
+              participant.user_id === currentUserId,
+          ),
     )
     .sort(
       (a, b) =>
@@ -257,12 +262,21 @@ export default function Dashboard() {
 
             {/* Admin */}
 
-            {user?.role === 'ADMIN' && (
+            {isAdminRole(user?.role) && (
               <Link
                 to="/admin"
                 className="rounded-lg border border-violet-400/10 bg-violet-400/[0.05] px-2.5 py-1.5 text-[10px] text-violet-300 transition hover:bg-violet-400/[0.10] sm:px-3 sm:text-xs"
               >
                 Admin
+              </Link>
+            )}
+
+            {isSuperAdminRole(user?.role) && (
+              <Link
+                to="/admin/users"
+                className="hidden rounded-lg border border-cyan-300/10 bg-cyan-300/[0.04] px-3 py-1.5 text-xs text-cyan-200/70 transition hover:bg-cyan-300/[0.08] sm:block"
+              >
+                Users
               </Link>
             )}
 
@@ -280,7 +294,7 @@ export default function Dashboard() {
             <button
               type="button"
               onClick={logout}
-              className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-[10px] text-white/50 transition hover:border-red-400/20 hover:bg-red-400/[0.06] hover:text-red-300 sm:px-3 sm:text-xs"
+              className="inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border border-white/10 bg-white/[0.03] px-3 text-[10px] font-medium leading-none text-white/55 transition hover:border-red-400/20 hover:bg-red-400/[0.06] hover:text-red-300 sm:h-9 sm:text-xs"
             >
               Logout
             </button>
@@ -444,7 +458,7 @@ export default function Dashboard() {
                 </div>
 
                 {userSessions.length === 0 ? (
-                  <EmptyState message="You have not participated in any sessions yet." />
+                  <EmptyState message={isSuperAdminRole(user?.role) ? 'No sessions have been recorded yet.' : isAdminRole(user?.role) ? 'No sessions are assigned to you yet.' : 'You have not participated in any sessions yet.'} />
                 ) : (
                   <div className="mt-3 space-y-2">
                     {userSessions
@@ -463,7 +477,7 @@ export default function Dashboard() {
                             session={session}
                             amountOwed={
                               participant?.amount_owed ??
-                              0
+                              (isAdminRole(user?.role) ? null : 0)
                             }
                           />
                         )
@@ -616,7 +630,7 @@ function SessionRow({
   amountOwed,
 }: {
   session: DrinkSession
-  amountOwed: string | number
+  amountOwed: string | number | null
 }) {
   const date =
     new Date(
@@ -635,6 +649,10 @@ function SessionRow({
           Session #{session.id}
         </p>
 
+        <p className="mt-0.5 truncate text-[8px] text-cyan-100/40">
+          Handler: {session.handler_name || 'Unassigned'}
+        </p>
+
         <p className="mt-0.5 truncate text-[9px] text-white/30">
           {date} · {session.packets_used} packets
         </p>
@@ -642,11 +660,11 @@ function SessionRow({
 
       <div className="shrink-0 text-right">
         <p className="text-xs font-semibold">
-          RM {Number(amountOwed).toFixed(2)}
+          RM {Number(amountOwed ?? session.total_cost).toFixed(2)}
         </p>
 
         <p className="mt-0.5 text-[8px] text-white/25">
-          Your share
+          {amountOwed === null ? 'Session total' : 'Your share'}
         </p>
       </div>
 

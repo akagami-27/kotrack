@@ -14,7 +14,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.enums import PaymentStatus, UserRole
+from app.models.enums import PaymentStatus, is_admin_role
 from app.models.payment import Payment
 from app.models.user import User
 from app.services.balance import calculate_user_balance
@@ -92,7 +92,7 @@ def confirm_payment(
     if not admin.is_active:
         raise ValueError("Admin user is inactive")
 
-    if admin.role != UserRole.ADMIN:
+    if not is_admin_role(admin.role):
         raise PermissionError("Only admins can confirm payments")
 
     payment = db.get(Payment, payment_id)
@@ -141,7 +141,7 @@ def reject_payment(
     if not admin.is_active:
         raise ValueError("Admin user is inactive")
 
-    if admin.role != UserRole.ADMIN:
+    if not is_admin_role(admin.role):
         raise PermissionError("Only admins can reject payments")
 
     payment = db.get(Payment, payment_id)

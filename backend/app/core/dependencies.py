@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.session import get_db
-from app.models.enums import UserRole
+from app.models.enums import UserRole, is_admin_role
 from app.models.user import User
 
 settings = get_settings()
@@ -63,10 +63,24 @@ def require_admin(
 ) -> User:
     """Allow access only to active administrator accounts."""
 
-    if current_user.role != UserRole.ADMIN:
+    if not is_admin_role(current_user.role):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Administrator access required",
+        )
+
+    return current_user
+
+
+def require_super_admin(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Allow access only to active super-administrator accounts."""
+
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Super administrator access required",
         )
 
     return current_user

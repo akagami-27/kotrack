@@ -27,12 +27,12 @@ from fastapi import (
     status,
 )
 from fastapi.responses import Response
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user, require_admin
 from app.db.session import get_db
-from app.models.enums import PaymentStatus
+from app.models.enums import PaymentStatus, UserRole, is_admin_role
 from app.models.payment import Payment
 from app.models.user import User
 from app.schemas.payment import PaymentRead
@@ -41,6 +41,7 @@ from app.services.payment_service import (
     create_payment,
     reject_payment,
 )
+from app.services.payment_access import payments_visible_to
 from app.services.upload_validation import detect_receipt_content_type
 
 
@@ -264,14 +265,18 @@ def download_payment_receipt(
         Can only download their own receipt.
 
     ADMIN:
-        Can download any payment receipt.
+        Can download receipts for payment accounts scoped to their assigned participants.
     """
 
-    payment = db.scalar(
-        select(Payment).where(
-            Payment.id == payment_id
+    stmt = select(Payment).where(Payment.id == payment_id)
+    if current_user.role == UserRole.ADMIN:
+        stmt = stmt.where(
+            or_(
+                Payment.user_id == current_user.id,
+                payments_visible_to(current_user),
+            )
         )
-    )
+    payment = db.scalar(stmt)
 
     if payment is None:
         raise HTTPException(
@@ -279,12 +284,8 @@ def download_payment_receipt(
             detail="Payment not found",
         )
 
-    # ------------------------------------------------------------------------
-    # Authorization
-    # ------------------------------------------------------------------------
-
     if (
-        current_user.role.value != "ADMIN"
+        not is_admin_role(current_user.role)
         and payment.user_id != current_user.id
     ):
         raise HTTPException(
@@ -347,6 +348,7 @@ def list_all_payments(
 
     return db.scalars(
         select(Payment)
+        .where(payments_visible_to(admin))
         .order_by(
             Payment.created_at.desc()
         )
@@ -370,7 +372,8 @@ def list_pending_payments(
     return db.scalars(
         select(Payment)
         .where(
-            Payment.status == PaymentStatus.PENDING
+            Payment.status == PaymentStatus.PENDING,
+            payments_visible_to(admin),
         )
         .order_by(
             Payment.created_at.asc()
@@ -402,6 +405,15 @@ def confirm_payment_endpoint(
     """
 
     try:
+        if db.scalar(
+            select(payments_visible_to(admin)).where(
+                Payment.id == payment_id
+            )
+        ) is not True:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Payment not found",
+            )
         payment = confirm_payment(
             db,
             payment_id=payment_id,
@@ -450,6 +462,15 @@ def reject_payment_endpoint(
     """
 
     try:
+        if db.scalar(
+            select(payments_visible_to(admin)).where(
+                Payment.id == payment_id
+            )
+        ) is not True:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Payment not found",
+            )
         payment = reject_payment(
             db,
             payment_id=payment_id,

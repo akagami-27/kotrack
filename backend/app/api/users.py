@@ -2,18 +2,33 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import get_current_user, require_admin
+from app.core.dependencies import (
+    get_current_user,
+    require_admin,
+    require_super_admin,
+)
 from app.db.session import get_db
+from app.models.enums import UserRole
 from app.models.user import User
 from app.schemas.user import (
     PasswordChangeRequest,
     UserRead,
+    SuperAdminUserRead,
+    UserRoleUpdate,
     UserUpdate,
 )
+from app.schemas.drink_session import SessionHandlerRead
 from app.services.user_service import (
     change_password,
     remove_user_avatar,
     update_user_profile,
+)
+from app.services.session_handler_service import (
+    clear_session_handler_assignments,
+)
+from app.services.user_management_service import (
+    LastSuperAdminError,
+    change_user_role,
 )
 
 
@@ -143,6 +158,29 @@ def get_users(
     )
 
 
+@router.get(
+    "/session-handlers",
+    response_model=list[SessionHandlerRead],
+    tags=["Session Handlers"],
+)
+def get_session_handlers(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return active administrators eligible to handle sessions."""
+    del current_user
+    return list(
+        db.scalars(
+            select(User)
+            .where(
+                User.is_active.is_(True),
+                User.role.in_([UserRole.ADMIN, UserRole.SUPER_ADMIN]),
+            )
+            .order_by(User.name.asc(), User.id.asc())
+        ).all()
+    )
+
+
 # ============================================================================
 # ADMIN USER MANAGEMENT
 # ============================================================================
@@ -236,9 +274,74 @@ def admin_deactivate_user(
             detail="User not found",
         )
 
+    if user.role == UserRole.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Super-admin accounts cannot be deactivated here",
+        )
+
     user.is_active = False
+    clear_session_handler_assignments(db, user_id=user.id)
 
     db.commit()
     db.refresh(user)
 
     return user
+
+
+@router.get(
+    "/super-admin/users",
+    response_model=list[SuperAdminUserRead],
+    tags=["Super-admin User Management"],
+)
+def super_admin_list_users(
+    current_user: User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    """List limited account details, including email, for super-admins."""
+    del current_user
+    return list(
+        db.scalars(select(User).order_by(User.name.asc(), User.id.asc())).all()
+    )
+
+
+@router.patch(
+    "/super-admin/users/{user_id}/role",
+    response_model=SuperAdminUserRead,
+    tags=["Super-admin User Management"],
+)
+def super_admin_update_user_role(
+    user_id: int,
+    role_update: UserRoleUpdate,
+    current_user: User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Promote to ADMIN or demote to USER; never allow public escalation."""
+    del current_user
+    try:
+        user = change_user_role(
+            db,
+            user_id=user_id,
+            role=role_update.role,
+        )
+        db.commit()
+        db.refresh(user)
+        return user
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except LastSuperAdminError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc

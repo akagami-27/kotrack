@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 
 import { apiRequest } from '../api/client'
 import { useAuth } from '../auth/useAuth'
+import { isAdminRole } from '../auth/roles'
 import ReceiptPreviewButton from '../components/ReceiptPreviewButton'
 
 type PaymentStatus = 'PENDING' | 'CONFIRMED' | 'REJECTED'
@@ -55,7 +56,7 @@ export default function AdminPayments() {
   useEffect(() => {
     let active = true
     const timer = window.setTimeout(() => {
-      if (user?.role === 'ADMIN') {
+      if (isAdminRole(user?.role)) {
         void loadPayments(() => active)
       } else {
         setLoading(false)
@@ -126,7 +127,7 @@ export default function AdminPayments() {
     0,
   )
 
-  if (user?.role !== 'ADMIN') {
+  if (!isAdminRole(user?.role)) {
     return (
       <main className="flex min-h-[100dvh] items-center justify-center bg-[#070910] px-6 pb-[env(safe-area-inset-bottom)] pt-[max(1rem,env(safe-area-inset-top))] text-white">
         <div className="text-center">

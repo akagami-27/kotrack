@@ -1,8 +1,8 @@
 """
 Business logic for drink session requests.
 
-Normal users can submit requests.
-Admins can approve or reject requests.
+Normal users can submit and view their own requests.
+Admins can review only requests assigned to them; super admins can review all.
 
 Actual drink-session costs are calculated by
 create_drink_session() when an admin approves a request.
@@ -21,6 +21,7 @@ from app.models.session_request_participant import (
 )
 from app.models.user import User
 from app.services.session_service import create_drink_session
+from app.services.session_handler_service import validate_session_handler
 
 
 def create_session_request(
@@ -30,6 +31,7 @@ def create_session_request(
     session_date,
     packets_used: Decimal,
     participant_user_ids: list[int],
+    handler_id: int | None = None,
     note: str | None = None,
 ) -> SessionRequest:
     """
@@ -65,6 +67,8 @@ def create_session_request(
         raise ValueError(
             "Requesting user is inactive"
         )
+
+    validate_session_handler(db, handler_id)
 
     stmt = select(User).where(
         User.id.in_(participant_user_ids)
@@ -105,6 +109,7 @@ def create_session_request(
         packets_used=packets_used,
         note=note,
         status="PENDING",
+        handler_id=handler_id,
     )
 
     session_request.participants = [
@@ -125,6 +130,7 @@ def get_session_requests(
     db: Session,
     *,
     status_filter: str | None = None,
+    handler_id: int | None = None,
 ) -> list[SessionRequest]:
     """Return session requests, optionally filtered by status."""
 
@@ -136,6 +142,9 @@ def get_session_requests(
         stmt = stmt.where(
             SessionRequest.status == status_filter
         )
+
+    if handler_id is not None:
+        stmt = stmt.where(SessionRequest.handler_id == handler_id)
 
     return list(
         db.execute(stmt).scalars().all()
@@ -187,10 +196,12 @@ def approve_session_request(
             "Administrator is inactive"
         )
 
-    if admin.role != UserRole.ADMIN:
-        raise ValueError(
-            "Only administrators can approve session requests"
+    if admin.role == UserRole.ADMIN and request.handler_id != admin.id:
+        raise PermissionError(
+            "You can approve only requests assigned to you"
         )
+    if admin.role not in {UserRole.ADMIN, UserRole.SUPER_ADMIN}:
+        raise ValueError("Only administrators can approve session requests")
 
     participant_user_ids = [
         participant.user_id
@@ -203,12 +214,22 @@ def approve_session_request(
         )
 
     try:
+        handler_id = request.handler_id
+        try:
+            validate_session_handler(db, handler_id)
+        except ValueError:
+            # Requests may outlive an administrator's eligibility. Keep
+            # approval usable and clear the stale assignment safely.
+            handler_id = None
+            request.handler_id = None
+
         drink_session = create_drink_session(
             db,
             session_date=request.session_date,
             packets_used=request.packets_used,
             participant_user_ids=participant_user_ids,
             created_by=admin_user_id,
+            handler_id=handler_id,
             commit=False,
         )
 
@@ -252,10 +273,12 @@ def reject_session_request(
             "Administrator is inactive"
         )
 
-    if admin.role != UserRole.ADMIN:
-        raise ValueError(
-            "Only administrators can reject session requests"
+    if admin.role == UserRole.ADMIN and request.handler_id != admin.id:
+        raise PermissionError(
+            "You can reject only requests assigned to you"
         )
+    if admin.role not in {UserRole.ADMIN, UserRole.SUPER_ADMIN}:
+        raise ValueError("Only administrators can reject session requests")
 
     request.status = "REJECTED"
     request.reviewed_by = admin_user_id

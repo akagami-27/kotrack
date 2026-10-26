@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 
 import { apiRequest } from '../api/client'
 import { useAuth } from '../auth/useAuth'
+import { isAdminRole, isSuperAdminRole } from '../auth/roles'
 
 type Participant = {
   user_id: number
@@ -19,6 +20,8 @@ type SessionRequest = {
   created_at: string
   reviewed_at: string | null
   reviewed_by: number | null
+  handler_id: number | null
+  handler_name: string | null
   participants: Participant[]
 }
 
@@ -29,6 +32,7 @@ type ManagedUser = {
   is_active: boolean
   created_at?: string
   avatar_data?: string | null
+  email?: string | null
 }
 
 type DrinkSession = {
@@ -38,6 +42,8 @@ type DrinkSession = {
   price_per_packet: string | number
   total_cost: string | number
   created_by: number
+  handler_id: number | null
+  handler_name: string | null
   participants: Participant[]
 }
 
@@ -234,7 +240,7 @@ export default function AdminDashboard() {
   }, [])
 
   useEffect(() => {
-    if (user?.role !== 'ADMIN') {
+    if (!isAdminRole(user?.role)) {
       return
     }
 
@@ -420,7 +426,7 @@ export default function AdminDashboard() {
         )
       : 0
 
-  if (user?.role !== 'ADMIN') {
+  if (!user || !isAdminRole(user.role)) {
     return (
       <main className="flex min-h-[100dvh] items-center justify-center bg-[#05070d] px-6 pb-[env(safe-area-inset-bottom)] pt-[max(1.5rem,env(safe-area-inset-top))] text-white">
         <div className="text-center">
@@ -520,6 +526,15 @@ export default function AdminDashboard() {
               </p>
             </div>
 
+            {isSuperAdminRole(user.role) && (
+              <Link
+                to="/admin/users"
+                className="min-h-10 rounded-xl border border-cyan-300/[0.10] bg-cyan-300/[0.035] px-2 py-2 text-[9px] text-cyan-100/70 transition hover:bg-cyan-300/[0.08] sm:px-4 sm:py-2.5 sm:text-xs"
+              >
+                User management
+              </Link>
+            )}
+
             <Link
               to="/dashboard"
               className="rounded-xl border border-cyan-300/[0.10] bg-white/[0.025] px-3 py-2 text-[10px] text-white/55 transition hover:border-cyan-300/20 hover:bg-cyan-300/[0.04] hover:text-cyan-100 sm:px-4 sm:py-2.5 sm:text-xs"
@@ -599,7 +614,7 @@ export default function AdminDashboard() {
                 ? '—'
                 : String(analytics?.summary.total_users ?? 0)
             }
-            description="Active accounts"
+            description={isSuperAdminRole(user?.role) ? 'Active accounts' : 'Assigned participants'}
             accent="cyan"
           />
 
@@ -674,7 +689,7 @@ export default function AdminDashboard() {
             <PanelHeader
               code="FIN-01"
               title="Financial Overview"
-              subtitle="SYSTEM-WIDE FINANCIAL STATE"
+              subtitle={isSuperAdminRole(user?.role) ? 'SYSTEM-WIDE FINANCIAL STATE' : 'ASSIGNED PARTICIPANT FINANCIAL STATE'}
             />
 
             <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -1126,9 +1141,9 @@ export default function AdminDashboard() {
                             {account.name}
                           </p>
 
-                          {account.role === 'ADMIN' && (
+                          {(account.role === 'ADMIN' || account.role === 'SUPER_ADMIN') && (
                             <span className="rounded-full border border-cyan-300/10 bg-cyan-300/[0.045] px-2 py-0.5 font-mono text-[8px] uppercase tracking-[0.14em] text-cyan-200/70">
-                              Admin
+                              {account.role === 'SUPER_ADMIN' ? 'Super-admin' : 'Admin'}
                             </span>
                           )}
                         </div>
@@ -1154,13 +1169,15 @@ export default function AdminDashboard() {
                       <button
                         type="button"
                         disabled={
-                          processing || isCurrentAdmin
+                          processing || isCurrentAdmin || account.role === 'SUPER_ADMIN'
                         }
                         onClick={() =>
                           void handleToggleUser(account)
                         }
                         title={
-                          isCurrentAdmin
+                          account.role === 'SUPER_ADMIN'
+                            ? 'Super-admin accounts cannot be deactivated here'
+                            : isCurrentAdmin
                             ? 'You cannot deactivate your own admin account'
                             : undefined
                         }
@@ -1217,8 +1234,8 @@ export default function AdminDashboard() {
             <LoadingBox text="Loading session records..." />
           ) : sessions.length === 0 ? (
             <EmptyBox
-              title="No drink sessions found."
-              description=""
+              title={isSuperAdminRole(user?.role) ? 'No drink sessions found.' : 'No sessions assigned to you yet.'}
+              description={isSuperAdminRole(user?.role) ? '' : 'A super admin can assign session handlers.'}
             />
           ) : (
             <>
@@ -1578,6 +1595,10 @@ function SessionAdminRow({
             {formatRM(Number(session.total_cost))}
           </p>
 
+          <p className="mt-1 text-[10px] text-cyan-100/45">
+            Handler: {session.handler_name || 'Unassigned'}
+          </p>
+
           <div className="mt-2 flex flex-wrap gap-1.5">
             {session.participants
               .slice(0, 5)
@@ -1653,6 +1674,10 @@ function EditSessionModal({
     ),
   )
 
+  const [handlerId, setHandlerId] = useState(
+    session.handler_id ? String(session.handler_id) : '',
+  )
+
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -1687,6 +1712,7 @@ function EditSessionModal({
             packets_used: Number(packets),
             participant_user_ids: participants,
             price_per_packet: Number(price),
+            handler_id: handlerId ? Number(handlerId) : null,
           }),
         },
       )
@@ -1704,15 +1730,26 @@ function EditSessionModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-3 backdrop-blur-md sm:p-4">
-      <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-cyan-300/[0.12] bg-[#080b13] p-4 shadow-[0_0_80px_rgba(34,211,238,0.07)] sm:p-6">
-        <div className="flex items-start justify-between gap-4">
+    <div
+      className="fixed inset-0 z-50 flex min-h-0 items-center justify-center bg-black/80 p-2 backdrop-blur-md sm:p-4"
+      style={{
+        paddingTop: 'max(0.5rem, env(safe-area-inset-top))',
+        paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))',
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="edit-session-title"
+        className="flex max-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-1rem)] w-full min-w-0 max-w-lg flex-col overflow-hidden rounded-3xl border border-cyan-300/[0.12] bg-[#080b13] shadow-[0_0_80px_rgba(34,211,238,0.07)]"
+      >
+        <div className="flex shrink-0 items-start justify-between gap-3 px-4 pb-3 pt-4 sm:px-6 sm:pt-6">
           <div>
             <p className="font-mono text-[8px] uppercase tracking-[0.24em] text-cyan-300/55">
               Session // Modify
             </p>
 
-            <h3 className="mt-2 text-xl font-semibold">
+            <h3 id="edit-session-title" className="mt-2 text-xl font-semibold">
               Edit session
             </h3>
           </div>
@@ -1721,6 +1758,7 @@ function EditSessionModal({
             type="button"
             onClick={onClose}
             disabled={saving}
+            aria-label="Close edit session"
             className="min-h-9 min-w-9 rounded-lg px-2 py-1 text-lg text-white/30 hover:bg-white/[0.05] hover:text-white"
           >
             ×
@@ -1728,16 +1766,17 @@ function EditSessionModal({
         </div>
 
         {error && (
-          <div className="mt-5 rounded-xl border border-red-400/10 bg-red-400/[0.05] px-4 py-3 text-xs text-red-300">
+          <div role="alert" className="mx-4 mb-2 shrink-0 rounded-xl border border-red-400/10 bg-red-400/[0.05] px-4 py-3 text-xs text-red-300 sm:mx-6">
             {error}
           </div>
         )}
 
         <form
           onSubmit={submit}
-          className="mt-5 space-y-4"
+          className="flex min-h-0 flex-1 flex-col px-4 pb-3 sm:px-6 sm:pb-5"
         >
-          <label className="block">
+          <div className="grid shrink-0 min-w-0 gap-3 sm:grid-cols-2">
+          <label className="block min-w-0 sm:col-span-2">
             <span className="mb-2 block font-mono text-[9px] uppercase tracking-wider text-white/35">
               Session date
             </span>
@@ -1750,11 +1789,10 @@ function EditSessionModal({
               }
               required
               disabled={saving}
-              className="w-full rounded-xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none focus:border-cyan-300/25 disabled:opacity-50"
+              className="block min-h-11 w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-black/25 px-3 py-3 text-base text-white outline-none focus:border-cyan-300/25 disabled:opacity-50 sm:px-4 sm:text-sm sm:col-span-2"
             />
           </label>
 
-          <div className="grid grid-cols-2 gap-2">
             <label className="block">
               <span className="mb-2 block font-mono text-[9px] uppercase tracking-wider text-white/35">
                 Packets
@@ -1770,7 +1808,7 @@ function EditSessionModal({
                 }
                 required
                 disabled={saving}
-                className="w-full rounded-xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none focus:border-cyan-300/25 disabled:opacity-50"
+                className="block min-h-11 w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-black/25 px-3 py-3 text-base text-white outline-none focus:border-cyan-300/25 disabled:opacity-50 sm:px-4 sm:text-sm"
               />
             </label>
 
@@ -1789,17 +1827,33 @@ function EditSessionModal({
                 }
                 required
                 disabled={saving}
-                className="w-full rounded-xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none focus:border-cyan-300/25 disabled:opacity-50"
+                className="block min-h-11 w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-black/25 px-3 py-3 text-base text-white outline-none focus:border-cyan-300/25 disabled:opacity-50 sm:px-4 sm:text-sm"
               />
             </label>
           </div>
 
-          <div>
-            <p className="mb-2 font-mono text-[9px] uppercase tracking-wider text-white/35">
+          <label className="mt-3 block min-w-0 shrink-0">
+            <span className="mb-2 block font-mono text-[9px] uppercase tracking-wider text-white/35">Session handler</span>
+            <select
+              value={handlerId}
+              onChange={(event) => setHandlerId(event.target.value)}
+              disabled={saving}
+              className="block min-h-11 w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-[#0b0d15] px-3 text-base text-white outline-none focus:border-cyan-300/25 disabled:opacity-50 sm:text-sm"
+            >
+              <option value="">Unassigned</option>
+              {users.filter((account) => account.is_active && isAdminRole(account.role)).map((account) => (
+                <option key={account.id} value={account.id}>{account.name}</option>
+              ))}
+            </select>
+          </label>
+
+          <div className="mt-3 flex min-h-0 flex-1 flex-col">
+            <p className="mb-2 flex shrink-0 items-center justify-between font-mono text-[9px] uppercase tracking-wider text-white/35">
               Participants
+              <span className="font-sans normal-case tracking-normal text-white/30">{participants.length} selected</span>
             </p>
 
-            <div className="max-h-52 space-y-1 overflow-y-auto rounded-xl border border-white/[0.07] bg-black/20 p-2">
+            <div className="min-h-16 max-h-[35dvh] min-w-0 flex-1 space-y-1 overflow-y-auto overscroll-contain rounded-xl border border-white/[0.07] bg-black/20 p-2">
               {users
                 .filter(
                   (account) => account.is_active,
@@ -1811,7 +1865,7 @@ function EditSessionModal({
                   return (
                     <label
                       key={account.id}
-                      className="flex min-h-10 cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-xs text-white/60 hover:bg-cyan-300/[0.025]"
+                      className="flex min-h-11 min-w-0 cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-xs text-white/60 hover:bg-cyan-300/[0.025]"
                     >
                       <input
                         type="checkbox"
@@ -1825,7 +1879,7 @@ function EditSessionModal({
                         className="h-4 w-4 accent-cyan-300"
                       />
 
-                      <span className="truncate">
+                      <span className="min-w-0 flex-1 break-words">
                         {account.name}
                       </span>
                     </label>
@@ -1834,12 +1888,12 @@ function EditSessionModal({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 pt-2">
+          <div className="grid shrink-0 grid-cols-2 gap-2 pt-3">
             <button
               type="button"
               onClick={onClose}
               disabled={saving}
-              className="min-h-11 rounded-xl border border-white/10 px-4 py-2.5 text-xs text-white/50 transition hover:bg-white/[0.05] hover:text-white disabled:opacity-40"
+              className="min-h-11 min-w-0 rounded-xl border border-white/10 px-2 py-2.5 text-[11px] text-white/50 transition hover:bg-white/[0.05] hover:text-white disabled:opacity-40 sm:px-4 sm:text-xs"
             >
               Cancel
             </button>
@@ -1849,7 +1903,7 @@ function EditSessionModal({
               disabled={
                 saving || participants.length === 0
               }
-              className="min-h-11 rounded-xl border border-cyan-200/20 bg-cyan-100 px-5 py-2.5 text-xs font-semibold text-black transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
+              className="min-h-11 min-w-0 rounded-xl border border-cyan-200/20 bg-cyan-100 px-2 py-2.5 text-[11px] font-semibold text-black transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-40 sm:px-5 sm:text-xs"
             >
               {saving
                 ? 'Saving...'
@@ -1954,6 +2008,9 @@ function RequestCard({
                 Requested by user #
                 {request.requested_by}
               </p>
+          <p className="mt-1 text-[10px] text-cyan-100/45">
+            Handler: {request.handler_name || 'Unassigned'}
+          </p>
             </div>
           </div>
 

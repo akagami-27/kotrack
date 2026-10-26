@@ -13,6 +13,13 @@ class SessionParticipantRead(BaseModel):
     amount_owed: Decimal
 
 
+class SessionHandlerRead(BaseModel):
+    id: int
+    name: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class DrinkSessionCreate(BaseModel):
     """
     Input schema for creating a session.
@@ -26,6 +33,8 @@ class DrinkSessionCreate(BaseModel):
     packets_used: Decimal = Field(gt=0)
 
     participant_user_ids: list[int] = Field(min_length=1)
+
+    handler_id: int | None = None
 
     price_per_packet: Decimal | None = Field(
         default=None,
@@ -67,6 +76,8 @@ class DrinkSessionUpdate(BaseModel):
         min_length=1,
     )
 
+    handler_id: int | None = None
+
     price_per_packet: Decimal | None = Field(
         default=None,
         gt=0,
@@ -99,6 +110,8 @@ class DrinkSessionRead(BaseModel):
     total_cost: Decimal
     created_by: int
     created_at: datetime
+    handler_id: int | None = None
+    handler_name: str | None = None
 
     participants: list[SessionParticipantRead] = Field(
         default_factory=list,
