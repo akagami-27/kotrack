@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.security import hash_password, verify_password
 from app.models.enums import UserRole
 from app.models.user import User
+from app.services.upload_validation import validate_avatar_data
 
 
 def create_user(
@@ -95,19 +96,7 @@ def update_user_profile(
     # ----------------------------------------------------------------------
 
     if avatar_data is not None:
-
-        if not avatar_data.startswith(
-            "data:image/webp;base64,"
-        ):
-            raise ValueError(
-                "Avatar must be a compressed WebP image"
-            )
-
-        if len(avatar_data) > 500_000:
-            raise ValueError(
-                "Avatar image is too large"
-            )
-
+        validate_avatar_data(avatar_data)
         user.avatar_data = avatar_data
 
     db.flush()

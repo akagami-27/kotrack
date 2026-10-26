@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type ChangeEvent,
   type FormEvent,
@@ -9,6 +10,7 @@ import { Link } from 'react-router-dom'
 
 import { apiRequest } from '../api/client'
 import { useAuth } from '../auth/useAuth'
+import ReceiptPreviewButton from '../components/ReceiptPreviewButton'
 
 type Balance = {
   user_id: number
@@ -32,6 +34,15 @@ type Payment = {
   confirmed_by: number | null
   receipt_filename?: string | null
   receipt_url?: string | null
+  receipt_content_type?: string | null
+}
+
+type ReceiptKind = 'image' | 'pdf' | 'heic'
+
+type SelectedReceipt = {
+  file: File
+  kind: ReceiptKind
+  previewUrl: string | null
 }
 
 const MAX_RECEIPT_SIZE = 25 * 1024 * 1024
@@ -49,7 +60,9 @@ export default function Payments() {
     useState('')
 
   const [receipt, setReceipt] =
-    useState<File | null>(null)
+    useState<SelectedReceipt | null>(null)
+  const receiptInputRef =
+    useRef<HTMLInputElement | null>(null)
 
   const [loading, setLoading] =
     useState(true)
@@ -62,6 +75,13 @@ export default function Payments() {
 
   const [success, setSuccess] =
     useState('')
+
+  useEffect(() => {
+    const previewUrl = receipt?.previewUrl
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl)
+    }
+  }, [receipt])
 
   const loadPaymentPage = useCallback(
     async (isCurrent: () => boolean = () => true) => {
@@ -119,12 +139,10 @@ export default function Payments() {
     setSuccess('')
 
     if (!file) {
-      setReceipt(null)
       return
     }
 
     if (file.size <= 0) {
-      setReceipt(null)
       setError(
         'The selected receipt file is empty.',
       )
@@ -133,7 +151,6 @@ export default function Payments() {
     }
 
     if (file.size > MAX_RECEIPT_SIZE) {
-      setReceipt(null)
       setError(
         'Receipt file must not exceed 25 MB.',
       )
@@ -141,7 +158,31 @@ export default function Payments() {
       return
     }
 
-    setReceipt(file)
+    const kind = getReceiptKind(file)
+    if (!kind) {
+      setError(
+        'Choose a JPEG, PNG, WebP, HEIC/HEIF, or PDF receipt.',
+      )
+      event.target.value = ''
+      return
+    }
+
+    const previewType = getReceiptPreviewType(file)
+    const previewUrl = previewType
+      ? URL.createObjectURL(
+          new Blob([file], { type: previewType }),
+        )
+      : null
+
+    setReceipt({ file, kind, previewUrl })
+  }
+
+  function clearReceipt() {
+    setReceipt(null)
+    setError('')
+    if (receiptInputRef.current) {
+      receiptInputRef.current.value = ''
+    }
   }
 
   async function handleSubmit(
@@ -185,7 +226,7 @@ export default function Payments() {
 
       formData.append(
         'receipt',
-        receipt,
+        receipt.file,
       )
 
       await apiRequest<Payment>(
@@ -253,8 +294,8 @@ export default function Payments() {
     user?.avatar_data ?? null
 
   return (
-    <header
-      className="min-h-screen bg-[#070910] pt-[env(safe-area-inset-top)] text-white"
+    <main
+      className="min-h-[100dvh] bg-[#070910] pt-[env(safe-area-inset-top)] text-white"
     >
       {/* HEADER */}
 
@@ -407,7 +448,7 @@ export default function Payments() {
             {/* ERROR */}
 
             {error && (
-              <section className="mt-3 rounded-xl border border-red-400/10 bg-red-400/[0.04] px-3 py-2.5">
+              <section role="alert" className="mt-3 rounded-xl border border-red-400/10 bg-red-400/[0.04] px-3 py-2.5">
                 <p className="text-[10px] text-red-300 sm:text-xs">
                   {error}
                 </p>
@@ -491,19 +532,19 @@ export default function Payments() {
                         submitting
                           ? 'cursor-not-allowed opacity-50'
                           : ''
-                      }`}
+                      } focus-within:ring-2 focus-within:ring-amber-300/60`}
                     >
                       <div className="min-w-0">
                         <p className="truncate text-[10px] text-white/65 sm:text-xs">
                           {receipt
-                            ? receipt.name
+                            ? receipt.file.name
                             : 'Choose receipt'}
                         </p>
 
                         <p className="mt-0.5 truncate text-[8px] text-white/20 sm:text-[9px]">
                           {receipt
                             ? formatFileSize(
-                                receipt.size,
+                                receipt.file.size,
                               )
                             : 'Maximum 25 MB'}
                         </p>
@@ -514,16 +555,77 @@ export default function Payments() {
                       </span>
 
                       <input
+                        ref={receiptInputRef}
                         id="payment-receipt"
                         name="receipt"
                         type="file"
+                        accept=".jpg,.jpeg,.png,.webp,.heic,.heif,.pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf"
+                        aria-describedby="payment-receipt-help"
                         onChange={
                           handleReceiptChange
                         }
                         disabled={submitting}
-                        className="hidden"
+                        className="sr-only"
                       />
                     </label>
+
+                    <p
+                      id="payment-receipt-help"
+                      className="mt-1.5 text-[9px] leading-4 text-white/30"
+                    >
+                      JPEG, PNG, WebP, HEIC/HEIF, or PDF - up to 25 MB
+                    </p>
+
+                    {receipt && (
+                      <div className="mt-3 rounded-xl border border-white/[0.07] bg-black/15 p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-xs font-medium text-white/75">
+                              {receipt.file.name}
+                            </p>
+                            <p className="mt-1 text-[10px] text-white/35">
+                              {receipt.kind === 'pdf'
+                                ? 'PDF document'
+                                : receipt.kind === 'heic'
+                                  ? 'HEIC/HEIF image'
+                                  : 'Image'}
+                              {' / '}
+                              {formatFileSize(receipt.file.size)}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={clearReceipt}
+                            className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-lg border border-white/10 px-3 py-2 text-xs text-white/60 hover:bg-white/[0.06]"
+                          >
+                            Remove
+                          </button>
+                        </div>
+
+                        {receipt.previewUrl && receipt.kind === 'image' && (
+                          <img
+                            src={receipt.previewUrl}
+                            alt={`Preview of ${receipt.file.name}`}
+                            className="mt-3 max-h-52 w-full rounded-lg bg-black/20 object-contain"
+                          />
+                        )}
+                        {receipt.previewUrl && receipt.kind === 'pdf' && (
+                          <a
+                            href={receipt.previewUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-3 inline-flex min-h-11 items-center rounded-lg border border-white/10 px-3 py-2 text-xs text-white/70 underline underline-offset-4"
+                          >
+                            Preview PDF
+                          </a>
+                        )}
+                        {receipt.kind === 'heic' && (
+                          <p className="mt-2 text-[10px] leading-4 text-white/35">
+                            HEIC/HEIF preview depends on browser support. The original file will be attached.
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -547,7 +649,7 @@ export default function Payments() {
               {/* SUCCESS */}
 
               {success && (
-                <div className="mt-3 rounded-xl border border-emerald-400/10 bg-emerald-400/[0.05] px-3 py-2.5">
+                <div role="status" aria-live="polite" className="mt-3 rounded-xl border border-emerald-400/10 bg-emerald-400/[0.05] px-3 py-2.5">
                   <p className="text-[10px] text-emerald-300 sm:text-xs">
                     {success}
                   </p>
@@ -627,7 +729,7 @@ export default function Payments() {
           </>
         )}
       </div>
-    </header>
+    </main>
   )
 }
 
@@ -760,6 +862,15 @@ function PaymentCard({
         )}
       </div>
 
+      {payment.receipt_filename && (
+        <div className="mt-2">
+          <ReceiptPreviewButton
+            paymentId={payment.id}
+            filename={payment.receipt_filename}
+          />
+        </div>
+      )}
+
       {/* REVIEWED */}
 
       {payment.confirmed_at && (
@@ -822,6 +933,55 @@ function formatFileSize(
     bytes /
     (1024 * 1024)
   ).toFixed(1)} MB`
+}
+
+function getReceiptKind(
+  file: File,
+): ReceiptKind | null {
+  const type = file.type.toLowerCase()
+  const name = file.name.toLowerCase()
+  const extension = name.slice(name.lastIndexOf('.'))
+
+  if (
+    type === 'application/pdf' ||
+    extension === '.pdf'
+  ) {
+    return 'pdf'
+  }
+
+  if (
+    type === 'image/heic' ||
+    type === 'image/heif' ||
+    type === 'image/heic-sequence' ||
+    type === 'image/heif-sequence' ||
+    extension === '.heic' ||
+    extension === '.heif'
+  ) {
+    return 'heic'
+  }
+
+  if (
+    ['image/jpeg', 'image/png', 'image/webp'].includes(type) ||
+    ['.jpg', '.jpeg', '.png', '.webp'].includes(extension)
+  ) {
+    return 'image'
+  }
+
+  return null
+}
+
+function getReceiptPreviewType(
+  file: File,
+): string | null {
+  const type = file.type.toLowerCase()
+  return [
+    'application/pdf',
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+  ].includes(type)
+    ? type
+    : null
 }
 
 /* ================================================================

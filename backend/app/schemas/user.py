@@ -36,7 +36,7 @@ class UserUpdate(BaseModel):
     avatar_data:
         - Omitted -> keep current avatar.
         - null -> remove current avatar.
-        - data:image/webp;base64,... -> replace avatar.
+        - JPEG or WebP data URL -> replace avatar.
     """
 
     name: str | None = Field(

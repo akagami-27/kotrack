@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 
 import { apiRequest } from '../api/client'
 import { useAuth } from '../auth/useAuth'
+import ReceiptPreviewButton from '../components/ReceiptPreviewButton'
 
 type PaymentStatus = 'PENDING' | 'CONFIRMED' | 'REJECTED'
 
@@ -14,6 +15,7 @@ type Payment = {
   created_at: string
   confirmed_at: string | null
   confirmed_by: number | null
+  receipt_filename?: string | null
 }
 
 export default function AdminPayments() {
@@ -126,7 +128,7 @@ export default function AdminPayments() {
 
   if (user?.role !== 'ADMIN') {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#070910] px-6 text-white">
+      <main className="flex min-h-[100dvh] items-center justify-center bg-[#070910] px-6 pb-[env(safe-area-inset-bottom)] pt-[max(1rem,env(safe-area-inset-top))] text-white">
         <div className="text-center">
 
           <h1 className="text-2xl font-semibold">
@@ -150,9 +152,9 @@ export default function AdminPayments() {
   }
 
   return (
-    <main className="min-h-screen bg-[#070910] text-white">
+    <main className="min-h-[100dvh] bg-[#070910] pb-[env(safe-area-inset-bottom)] text-white">
 
-      <header className="border-b border-white/[0.06]">
+      <header className="border-b border-white/[0.06] pt-[env(safe-area-inset-top)]">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
 
           <Link
@@ -233,7 +235,7 @@ export default function AdminPayments() {
 
         {/* Messages */}
         {success && (
-          <div className="mt-6 rounded-xl border border-emerald-400/10 bg-emerald-400/[0.05] px-5 py-4">
+          <div role="status" aria-live="polite" className="mt-6 rounded-xl border border-emerald-400/10 bg-emerald-400/[0.05] px-5 py-4">
             <p className="text-sm text-emerald-300">
               {success}
             </p>
@@ -241,7 +243,7 @@ export default function AdminPayments() {
         )}
 
         {error && (
-          <div className="mt-6 rounded-xl border border-red-400/10 bg-red-400/[0.05] px-5 py-4">
+          <div role="alert" className="mt-6 rounded-xl border border-red-400/10 bg-red-400/[0.05] px-5 py-4">
             <p className="text-sm text-red-300">
               {error}
             </p>
@@ -403,6 +405,15 @@ function PaymentRow({
                 Reviewed by admin ID:{' '}
                 {payment.confirmed_by}
               </p>
+            )}
+
+            {payment.receipt_filename && (
+              <div className="pt-2">
+                <ReceiptPreviewButton
+                  paymentId={payment.id}
+                  filename={payment.receipt_filename}
+                />
+              </div>
             )}
 
           </div>

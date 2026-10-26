@@ -59,7 +59,7 @@ export default function Register() {
   }
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#070910] px-6 text-white">
+    <main className="relative flex min-h-[100dvh] items-center justify-center overflow-hidden bg-[#070910] px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(1.5rem,env(safe-area-inset-top))] text-white sm:px-6">
       {/* Background glow */}
       <div className="pointer-events-none fixed inset-0">
         <div className="absolute left-1/2 top-[-300px] h-[600px] w-[600px] -translate-x-1/2 rounded-full bg-violet-500/[0.08] blur-[150px]" />

@@ -138,7 +138,7 @@ export default function AdminCreateSession() {
 
   if (user?.role !== 'ADMIN') {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#070910] px-6 text-white">
+      <main className="flex min-h-[100dvh] items-center justify-center bg-[#070910] px-6 pb-[env(safe-area-inset-bottom)] pt-[max(1rem,env(safe-area-inset-top))] text-white">
         <div className="text-center">
 
           <h1 className="text-2xl font-semibold">
@@ -163,8 +163,8 @@ export default function AdminCreateSession() {
 
   if (createdSession) {
     return (
-      <main className="min-h-screen bg-[#070910] text-white">
-        <div className="relative flex min-h-screen items-center justify-center px-6">
+      <main className="min-h-[100dvh] bg-[#070910] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] text-white">
+        <div className="relative flex min-h-[100dvh] items-center justify-center px-4 sm:px-6">
 
           <div className="pointer-events-none absolute inset-0">
             <div className="absolute left-1/2 top-1/2 h-[500px] w-[500px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-violet-600/[0.06] blur-[150px]" />
@@ -268,7 +268,7 @@ export default function AdminCreateSession() {
   }
 
   return (
-    <main className="min-h-screen bg-[#070910] text-white">
+    <main className="min-h-[100dvh] bg-[#070910] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] text-white">
 
       <div className="mx-auto max-w-3xl px-5 py-10 sm:px-8 lg:py-14">
 

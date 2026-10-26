@@ -3,6 +3,7 @@ import {
   Suspense,
   useEffect,
   useRef,
+  useState,
 } from 'react'
 import { Link } from 'react-router-dom'
 import gsap from 'gsap'
@@ -42,7 +43,10 @@ export default function Landing() {
         '(prefers-reduced-motion: reduce)',
       ).matches
 
-    if (reduceMotion) {
+    const prefersCompactMotion =
+      window.matchMedia('(max-width: 640px)').matches
+
+    if (reduceMotion || prefersCompactMotion) {
       return
     }
 
@@ -202,6 +206,38 @@ export default function Landing() {
     return () => {
       ctx.revert()
     }
+  }, [])
+
+  const [showHeroScene, setShowHeroScene] =
+    useState(false)
+
+  useEffect(() => {
+    const prefersReducedMotion =
+      window.matchMedia(
+        '(prefers-reduced-motion: reduce)',
+      ).matches
+    const isCompactViewport =
+      window.matchMedia('(max-width: 640px)').matches
+    const saveData = (
+      navigator as Navigator & {
+        connection?: { saveData?: boolean }
+      }
+    ).connection?.saveData
+
+    if (
+      prefersReducedMotion ||
+      isCompactViewport ||
+      saveData
+    ) {
+      return
+    }
+
+    const timer = window.setTimeout(
+      () => setShowHeroScene(true),
+      1200,
+    )
+
+    return () => window.clearTimeout(timer)
   }, [])
 
   return (
@@ -409,10 +445,15 @@ export default function Landing() {
 
             {/* Existing 3D scene */}
 
-            <div className="absolute inset-0">
-              <Suspense fallback={null}>
-                <HeroScene />
-              </Suspense>
+            <div
+              aria-hidden="true"
+              className="absolute inset-0"
+            >
+              {showHeroScene && (
+                <Suspense fallback={null}>
+                  <HeroScene />
+                </Suspense>
+              )}
             </div>
 
             {/* ========================================================== */}

@@ -91,8 +91,8 @@ export default function Settings() {
   }
 
   return (
-    <header className="min-h-screen bg-[#070910] text-white">
-      <div className="mx-auto max-w-3xl px-5 py-10 sm:px-8">
+    <main className="min-h-[100dvh] overflow-x-hidden bg-[#070910] pb-[env(safe-area-inset-bottom)] pt-[max(1rem,env(safe-area-inset-top))] text-white">
+      <div className="mx-auto max-w-3xl px-4 py-6 sm:px-8 sm:py-10">
 
         <div className="mb-8 flex items-center justify-between gap-4">
 
@@ -218,7 +218,7 @@ export default function Settings() {
         </section>
 
       </div>
-    </header>
+    </main>
   )
 }
 

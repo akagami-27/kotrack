@@ -136,3 +136,39 @@ export async function apiRequest<T>(
 
   return data as T
 }
+
+export async function apiBlobRequest(
+  path: string,
+): Promise<Blob> {
+  const headers = new Headers()
+  const token = localStorage.getItem(TOKEN_KEY)
+
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+
+  let response: Response
+
+  try {
+    response = await fetch(`${API_URL}${path}`, { headers })
+  } catch {
+    throw new Error(
+      'Unable to reach KoTrack API. Check your connection and try again.',
+    )
+  }
+
+  if (response.status === 401) {
+    localStorage.removeItem(TOKEN_KEY)
+    throw new Error(
+      'Your session has expired. Please sign in again.',
+    )
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `Unable to open receipt (HTTP ${response.status}).`,
+    )
+  }
+
+  return response.blob()
+}
