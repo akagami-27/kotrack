@@ -161,7 +161,7 @@ jobs:
           load: true
           tags: kotrack-backend:${{ github.sha }}
       - name: Scan backend image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: kotrack-backend:${{ github.sha }}
           severity: HIGH,CRITICAL
@@ -173,7 +173,7 @@ jobs:
           load: true
           tags: kotrack-frontend:${{ github.sha }}
       - name: Scan frontend image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: kotrack-frontend:${{ github.sha }}
           severity: HIGH,CRITICAL
@@ -223,14 +223,14 @@ jobs:
             public-registry.smolelab.com/og/kotrack-backend:${{ github.sha }}
 
       - name: Scan the exact frontend digest that will be deployed
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: public-registry.smolelab.com/og/kotrack-frontend@${{ steps.frontend-image.outputs.digest }}
           severity: HIGH,CRITICAL
           exit-code: "1"
 
       - name: Scan the exact backend digest that will be migrated and deployed
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: public-registry.smolelab.com/og/kotrack-backend@${{ steps.backend-image.outputs.digest }}
           severity: HIGH,CRITICAL
