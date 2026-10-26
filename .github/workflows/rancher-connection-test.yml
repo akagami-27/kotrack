@@ -1,0 +1,50 @@
+name: Rancher Connection Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-connection:
+    name: Test Rancher Authentication
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure Rancher connection
+        shell: bash
+        env:
+          RANCHER_ACCESS_KEY: ${{ secrets.RANCHER_ACCESS_KEY }}
+          RANCHER_SECRET_KEY: ${{ secrets.RANCHER_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$RANCHER_ACCESS_KEY" || -z "$RANCHER_SECRET_KEY" ]]; then
+            echo "Rancher credentials are missing."
+            exit 1
+          fi
+
+          kubectl config set-cluster rancher \
+            --server=https://rancher.smolelab.com/k8s/clusters/local
+
+          kubectl config set-credentials github-actions \
+            --token="${RANCHER_ACCESS_KEY}:${RANCHER_SECRET_KEY}"
+
+          kubectl config set-context kotrack-test \
+            --cluster=rancher \
+            --user=github-actions \
+            --namespace=app
+
+          kubectl config use-context kotrack-test
+
+      - name: Verify read-only access
+        run: |
+          set -euo pipefail
+
+          kubectl get deployment kotrack-backend -n app
+          kubectl get deployment kotrack-frontend -n app
