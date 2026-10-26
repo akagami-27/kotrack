@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -8,6 +8,10 @@ from app.db.base import Base
 
 class PasswordResetRequest(Base):
     __tablename__ = "password_reset_requests"
+    __table_args__ = (
+        CheckConstraint("status IN ('PENDING', 'APPROVED', 'REJECTED', 'COMPLETED', 'CLOSED_LEGACY')", name="ck_password_reset_requests_status"),
+        Index("uq_password_reset_open_request_per_user", "user_id", unique=True, postgresql_where=text("status IN ('PENDING', 'APPROVED')")),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
@@ -15,24 +19,6 @@ class PasswordResetRequest(Base):
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
-    )
-
-    code_hash: Mapped[str | None] = mapped_column(
-        String(255),
-        nullable=True,
-    )
-
-    expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-        index=True,
-    )
-
-    attempts: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=0,
-        server_default="0",
     )
 
     used: Mapped[bool] = mapped_column(
@@ -58,6 +44,24 @@ class PasswordResetRequest(Base):
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
+
+    rejected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    rejected_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # State and short-lived browser continuity are stored server-side.
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="PENDING", server_default="PENDING"
+    )
+    reset_session_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    session_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user: Mapped["User"] = relationship(
         foreign_keys=[user_id],

@@ -1,0 +1,56 @@
+# Template only: replace the image digest with the frontend digest produced by
+# the same CI run as the backend digest before applying. Do not apply unchanged.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kotrack-frontend
+  namespace: app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kotrack-frontend
+  template:
+    metadata:
+      labels:
+        app: kotrack-frontend
+    spec:
+      imagePullSecrets:
+        - name: harbor-registry
+      containers:
+        - name: frontend
+          image: public-registry.smolelab.com/og/kotrack-frontend@sha256:REPLACE_WITH_CI_FRONTEND_DIGEST
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 2
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kotrack-frontend
+  namespace: app
+spec:
+  selector:
+    app: kotrack-frontend
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 80
+  type: ClusterIP

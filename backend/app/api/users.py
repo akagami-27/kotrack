@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import (
@@ -23,6 +24,7 @@ from app.services.user_service import (
     remove_user_avatar,
     update_user_profile,
 )
+from app.services.password_reset_service import request_password_reset
 from app.services.session_handler_service import (
     clear_session_handler_assignments,
 )
@@ -92,6 +94,35 @@ def update_my_profile(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+
+
+@router.post("/me/password-reset-request", status_code=status.HTTP_202_ACCEPTED)
+def request_my_password_reset(
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Submit an audited request bound to this browser's private cookie."""
+    try:
+        reset_request, session_value = request_password_reset(
+            db,
+            name=current_user.name,
+            existing_session=request.cookies.get("kotrack_reset_session"),
+        )
+        db.commit()
+        response.set_cookie(
+            "kotrack_reset_session", session_value, max_age=86400,
+            httponly=True, secure=True, samesite="strict",
+            path="/api/auth/password-reset",
+        )
+        return {
+            "message": "Password reset request submitted for Super Admin review.",
+            "request_id": reset_request.id if reset_request else None,
+        }
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(status_code=503, detail="Recovery is temporarily unavailable") from None
 
 
 @router.post(
@@ -298,7 +329,7 @@ def super_admin_list_users(
     current_user: User = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ):
-    """List limited account details, including email, for super-admins."""
+    """List limited account details for super-admins."""
     del current_user
     return list(
         db.scalars(select(User).order_by(User.name.asc(), User.id.asc())).all()

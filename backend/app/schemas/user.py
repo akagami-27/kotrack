@@ -1,8 +1,6 @@
 from datetime import datetime
 
-import re
-
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import UserRole
 
@@ -15,17 +13,6 @@ class UserCreate(UserBase):
     """Input schema for creating a normal user."""
 
     password: str = Field(min_length=8)
-    email: str | None = Field(default=None, max_length=320)
-
-    @field_validator("email")
-    @classmethod
-    def validate_email(cls, value: str | None) -> str | None:
-        if value is None or not value.strip():
-            return None
-        normalized = value.strip().lower()
-        if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", normalized):
-            raise ValueError("Enter a valid email address")
-        return normalized
 
 
 class UserRead(BaseModel):
@@ -46,7 +33,6 @@ class SuperAdminUserRead(BaseModel):
 
     id: int
     name: str
-    email: str | None
     role: UserRole
     is_active: bool
     created_at: datetime
@@ -93,9 +79,4 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 class PasswordResetRequestCreate(BaseModel):
-    name: str
-
-class PasswordResetConfirm(BaseModel):
-    name: str
-    code: str
-    new_password: str
+    name: str = Field(min_length=1, max_length=255)

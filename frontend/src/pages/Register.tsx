@@ -7,7 +7,6 @@ export default function Register() {
   const navigate = useNavigate()
 
   const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState('')
@@ -39,7 +38,6 @@ export default function Register() {
         method: 'POST',
         body: JSON.stringify({
           name,
-          email: email.trim() || null,
           password,
         }),
       })
@@ -141,27 +139,6 @@ export default function Register() {
                 placeholder="Choose your name"
                 required
                 autoComplete="username"
-                disabled={submitting}
-                className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/20 focus:border-white/25 focus:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-50"
-              />
-            </div>
-
-            {/* Password */}
-            <div>
-              <label
-                htmlFor="email"
-                className="mb-2 block text-xs font-medium text-white/50"
-              >
-                Email <span className="text-white/25">(optional)</span>
-              </label>
-
-              <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="you@example.com"
-                autoComplete="email"
                 disabled={submitting}
                 className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/20 focus:border-white/25 focus:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-50"
               />

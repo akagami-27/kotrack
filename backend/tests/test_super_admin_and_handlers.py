@@ -51,12 +51,10 @@ def add_user(
     name: str,
     role: UserRole,
     *,
-    email: str | None = None,
     active: bool = True,
 ) -> User:
     user = User(
         name=name,
-        email=email,
         password_hash="not-a-real-password-hash",
         role=role,
         is_active=active,
@@ -99,12 +97,7 @@ def test_super_admin_can_promote_and_response_has_no_secrets(
     db: Session,
 ) -> None:
     actor = add_user(db, "root", UserRole.SUPER_ADMIN)
-    target = add_user(
-        db,
-        "person",
-        UserRole.USER,
-        email="person@example.com",
-    )
+    target = add_user(db, "person", UserRole.USER)
     db.commit()
 
     fastapi_app.dependency_overrides[get_current_user] = lambda: actor
@@ -120,7 +113,7 @@ def test_super_admin_can_promote_and_response_has_no_secrets(
         person = next(
             row for row in listed.json() if row["name"] == "person"
         )
-        assert person["email"] == "person@example.com"
+        assert "email" not in person
         assert "password_hash" not in person
         assert changed.status_code == 200
         assert changed.json()["role"] == "ADMIN"
@@ -138,7 +131,7 @@ def test_last_super_admin_cannot_be_demoted(db: Session) -> None:
 
 def test_ordinary_user_endpoint_does_not_expose_email(db: Session) -> None:
     actor = add_user(db, "member", UserRole.USER)
-    add_user(db, "private", UserRole.USER, email="private@example.com")
+    add_user(db, "private", UserRole.USER)
     db.commit()
     fastapi_app.dependency_overrides[get_current_user] = lambda: actor
     fastapi_app.dependency_overrides[get_db] = lambda: db

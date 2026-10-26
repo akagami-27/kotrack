@@ -23,8 +23,8 @@ export default function Login() {
   const [showForgotPassword, setShowForgotPassword] = useState(false)
   const [resetStep, setResetStep] = useState<ResetStep>('request')
 
-  const [resetCode, setResetCode] = useState('')
   const [newPassword, setNewPassword] = useState('')
+  const [resetStatus, setResetStatus] = useState('PENDING')
 
   async function handleSubmit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -56,13 +56,15 @@ export default function Login() {
         body: JSON.stringify({
           name: name.trim(),
         }),
+        credentials: 'include',
       })
 
       setSuccess(
-        'Reset request submitted. Please contact an administrator for your reset code.',
+        'If the account is eligible, the request has been recorded for Super Admin review. Keep this browser open to continue after approval.',
       )
 
       setResetStep('confirm')
+      setResetStatus('PENDING')
     } catch (err) {
       setError(
         err instanceof Error
@@ -82,13 +84,24 @@ export default function Login() {
     setSubmitting(true)
 
     try {
-      await apiRequest('/api/auth/password-reset/confirm', {
+      const state = await apiRequest<{ status: string }>('/api/auth/password-reset/status', {
+        credentials: 'include',
+      })
+      setResetStatus(state.status)
+      if (state.status !== 'APPROVED') {
+        setSuccess(state.status === 'PENDING'
+          ? 'Your request is awaiting Super Admin review.'
+          : state.status === 'REJECTED'
+            ? 'This request was rejected. Contact a Super Admin to confirm next steps.'
+            : 'This recovery session is unavailable or expired. Submit a new request.')
+        return
+      }
+      await apiRequest('/api/auth/password-reset/complete', {
         method: 'POST',
         body: JSON.stringify({
-          name: name.trim(),
-          code: resetCode.trim(),
           new_password: newPassword,
         }),
+        credentials: 'include',
       })
 
       setSuccess(
@@ -96,7 +109,6 @@ export default function Login() {
       )
 
       setPassword('')
-      setResetCode('')
       setNewPassword('')
 
       setShowForgotPassword(false)
@@ -112,11 +124,39 @@ export default function Login() {
     }
   }
 
+  async function refreshResetStatus() {
+    setSubmitting(true)
+    setError('')
+    try {
+      const state = await apiRequest<{ status: string }>('/api/auth/password-reset/status', { credentials: 'include' })
+      setResetStatus(state.status)
+      setSuccess(state.status === 'APPROVED'
+        ? 'Approved. Set your new password below.'
+        : state.status === 'PENDING'
+          ? 'Your request is awaiting Super Admin review.'
+          : 'This recovery session is unavailable or expired.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to check request status')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   function openForgotPassword() {
     setError('')
     setSuccess('')
     setShowForgotPassword(true)
     setResetStep('request')
+    void apiRequest<{ status: string }>('/api/auth/password-reset/status', {
+      credentials: 'include',
+    }).then((state) => {
+      if (state.status === 'PENDING' || state.status === 'APPROVED' || state.status === 'REJECTED') {
+        setResetStatus(state.status)
+        setResetStep('confirm')
+      }
+    }).catch(() => {
+      // No existing private recovery session; show the request form.
+    })
   }
 
   function closeForgotPassword() {
@@ -124,7 +164,6 @@ export default function Login() {
     setSuccess('')
     setShowForgotPassword(false)
     setResetStep('request')
-    setResetCode('')
     setNewPassword('')
   }
 
@@ -434,8 +473,7 @@ export default function Login() {
                   </h1>
 
                   <p className="mt-3 text-sm leading-6 text-white/40">
-                    An administrator must approve your reset request
-                    and provide you with a reset code.
+                    A Super Admin reviews your request. Approval is returned only to this browser session.
                   </p>
                 </div>
 
@@ -478,7 +516,7 @@ export default function Login() {
                     >
                       {submitting
                         ? 'Submitting...'
-                        : 'Request reset code'}
+                        : 'Request password reset'}
                     </button>
 
                   </form>
@@ -487,33 +525,9 @@ export default function Login() {
                     onSubmit={handleResetConfirm}
                     className="mt-7 space-y-5"
                   >
-                    <div>
-                      <label
-                        htmlFor="reset-code"
-                        className="mb-2 block text-sm font-medium text-white/70"
-                      >
-                        Reset code
-                      </label>
-
-                      <input
-                        id="reset-code"
-                        type="text"
-                        value={resetCode}
-                        onChange={(event) =>
-                          setResetCode(
-                            event.target.value
-                              .replace(/\D/g, '')
-                              .slice(0, 6),
-                          )
-                        }
-                        placeholder="Enter 6-digit code"
-                        inputMode="numeric"
-                        maxLength={6}
-                        required
-                        disabled={submitting}
-                        className={`${fieldClass} tracking-[0.2em] placeholder:tracking-normal`}
-                      />
-                    </div>
+                    <p className="text-sm text-white/55" role="status">
+                      Request status: {resetStatus.toLowerCase().replace('_', ' ')}.
+                    </p>
 
                     <div>
                       <label
@@ -541,26 +555,21 @@ export default function Login() {
 
                     <button
                       type="submit"
-                      disabled={submitting}
+                      disabled={submitting || resetStatus !== 'APPROVED'}
                       className={primaryButtonClass}
                     >
                       {submitting
                         ? 'Resetting password...'
-                        : 'Reset password'}
+                        : 'Set new password'}
                     </button>
 
                     <button
                       type="button"
-                      onClick={() => {
-                        setResetStep('request')
-                        setError('')
-                        setSuccess('')
-                        setResetCode('')
-                        setNewPassword('')
-                      }}
+                      onClick={() => void refreshResetStatus()}
+                      disabled={submitting}
                       className="min-h-11 w-full rounded-lg px-3 text-sm font-medium text-white/60 outline-none transition-colors duration-150 hover:text-white focus-visible:ring-2 focus-visible:ring-white/50"
                     >
-                      Request a new code
+                      Check approval status
                     </button>
                   </form>
                 )}

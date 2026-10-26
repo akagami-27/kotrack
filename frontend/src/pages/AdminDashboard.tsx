@@ -32,7 +32,6 @@ type ManagedUser = {
   is_active: boolean
   created_at?: string
   avatar_data?: string | null
-  email?: string | null
 }
 
 type DrinkSession = {

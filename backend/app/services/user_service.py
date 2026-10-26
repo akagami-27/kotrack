@@ -6,7 +6,7 @@ and authentication.
 """
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from app.core.security import hash_password, verify_password
 from app.models.enums import UserRole
@@ -19,7 +19,6 @@ def create_user(
     *,
     name: str,
     password: str,
-    email: str | None = None,
 ) -> User:
     """Create a normal USER account."""
 
@@ -37,20 +36,8 @@ def create_user(
             "A user with this name already exists"
         )
 
-    if email is not None:
-        email = email.strip().lower() or None
-        if email is not None:
-            existing_email = db.execute(
-                select(User).where(User.email == email)
-            ).scalar_one_or_none()
-            if existing_email is not None:
-                raise ValueError(
-                    "A user with this email address already exists"
-                )
-
     user = User(
         name=name,
-        email=email,
         password_hash=hash_password(password),
         role=UserRole.USER,
         is_active=True,
@@ -178,7 +165,16 @@ def authenticate_user(
     name = name.strip()
 
     user = db.execute(
-        select(User).where(User.name == name)
+        select(User)
+        .options(
+            load_only(
+                User.id,
+                User.password_hash,
+                User.is_active,
+                User.role,
+            )
+        )
+        .where(User.name == name)
     ).scalar_one_or_none()
 
     if user is None:

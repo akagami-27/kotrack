@@ -10,27 +10,24 @@ Supports:
 Both login methods return the same JWT access token.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import logging
+
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.security import create_access_token
 from app.db.session import get_db
-from app.models.password_reset import PasswordResetRequest
 from app.models.user import User
 from app.schemas.user import (
     LoginRequest,
-    PasswordResetConfirm,
     PasswordResetRequestCreate,
     TokenResponse,
     UserCreate,
     UserRead,
 )
-from app.services.password_reset_service import (
-    request_password_reset,
-    reset_password,
-)
+from app.services.password_reset_service import complete_password_reset, request_password_reset
 from app.services.user_service import (
     authenticate_user,
     create_user,
@@ -41,6 +38,37 @@ router = APIRouter(
     prefix="/api/auth",
     tags=["Authentication"],
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _authenticate_or_unavailable(
+    db: Session,
+    *,
+    name: str,
+    password: str,
+) -> User | None:
+    """Authenticate without returning database diagnostics to the caller."""
+    try:
+        return authenticate_user(db, name=name, password=password)
+    except SQLAlchemyError as exc:
+        try:
+            db.rollback()
+        except SQLAlchemyError as rollback_exc:
+            logger.error(
+                "Authentication database rollback failed (%s)",
+                type(rollback_exc).__name__,
+            )
+        # Exception text can contain query details or connection metadata.
+        logger.error(
+            "Authentication database operation failed (%s)",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication is temporarily unavailable",
+            headers={"Retry-After": "30"},
+        ) from None
 
 
 # ============================================================================
@@ -68,7 +96,6 @@ def register(
             db,
             name=user_data.name,
             password=user_data.password,
-            email=user_data.email,
         )
 
         db.commit()
@@ -104,7 +131,7 @@ def login(
     This endpoint is used by the React application.
     """
 
-    user = authenticate_user(
+    user = _authenticate_or_unavailable(
         db,
         name=login_data.name,
         password=login_data.password,
@@ -155,7 +182,7 @@ def login_for_swagger(
     The username is mapped to the application's User.name field.
     """
 
-    user = authenticate_user(
+    user = _authenticate_or_unavailable(
         db,
         name=form_data.username,
         password=form_data.password,
@@ -186,100 +213,75 @@ def login_for_swagger(
 # ============================================================================
 
 
-@router.post(
-    "/password-reset/request",
-)
+@router.post("/password-reset/request", status_code=status.HTTP_202_ACCEPTED)
 def password_reset_request(
     reset_data: PasswordResetRequestCreate,
+    request: Request,
+    response: Response,
     db: Session = Depends(get_db),
 ):
-    """
-    Submit an admin-assisted password reset request.
-
-    The request must be approved by an administrator
-    before a reset code can be generated.
-    """
-
+    """Submit a non-enumerating recovery request and set a private browser cookie."""
     try:
-        reset_request = request_password_reset(
-            db,
-            name=reset_data.name,
+        _, session_value = request_password_reset(
+            db, name=reset_data.name,
+            existing_session=request.cookies.get("kotrack_reset_session"),
         )
-
         db.commit()
-        db.refresh(reset_request)
-
-        return {
-            "message": "Password reset request submitted",
-            "request_id": reset_request.id,
-        }
-
-    except ValueError as exc:
+    except SQLAlchemyError:
         db.rollback()
-
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
-
-
-# ============================================================================
-# PASSWORD RESET CONFIRMATION
-# ============================================================================
+        raise HTTPException(status_code=503, detail="Recovery is temporarily unavailable") from None
+    response.set_cookie(
+        "kotrack_reset_session", session_value, max_age=7200, httponly=True,
+        secure=True, samesite="strict",
+        path="/api/auth/password-reset",
+    )
+    return {"message": "If the account is eligible, the request has been recorded for review."}
 
 
-@router.post(
-    "/password-reset/confirm",
-)
-def password_reset_confirm(
-    reset_data: PasswordResetConfirm,
+@router.get("/password-reset/status")
+def password_reset_status(
+    kotrack_reset_session: str | None = Cookie(default=None),
     db: Session = Depends(get_db),
 ):
-    """
-    Reset a user's password using an approved one-time code.
-    """
+    from datetime import datetime, timezone
+    from hashlib import sha256
+    from sqlalchemy import select
+    from app.models.password_reset import PasswordResetRequest
+    if not kotrack_reset_session:
+        return {"status": "UNAVAILABLE"}
+    digest = sha256(kotrack_reset_session.encode()).hexdigest()
+    row = db.execute(select(PasswordResetRequest.status, PasswordResetRequest.session_expires_at).where(
+        PasswordResetRequest.reset_session_hash == digest,
+    )).first()
+    if row is None or row.session_expires_at is None:
+        return {"status": "UNAVAILABLE"}
+    expiry = row.session_expires_at
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=timezone.utc)
+    return {"status": row.status if expiry > datetime.now(timezone.utc) else "EXPIRED"}
 
-    reset_request = db.execute(
-        select(PasswordResetRequest)
-        .select_from(PasswordResetRequest)
-        .join(
-            User,
-            PasswordResetRequest.user_id == User.id,
-        )
-        .where(
-            User.name == reset_data.name.strip(),
-            PasswordResetRequest.used.is_(False),
-        )
-        .order_by(
-            PasswordResetRequest.created_at.desc()
-        )
-    ).scalars().first()
 
-    if reset_request is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid password reset request",
-        )
+from pydantic import BaseModel, Field
 
+
+class PasswordResetComplete(BaseModel):
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+@router.post("/password-reset/complete")
+def password_reset_complete(
+    reset_data: PasswordResetComplete,
+    response: Response,
+    kotrack_reset_session: str | None = Cookie(default=None),
+    db: Session = Depends(get_db),
+):
+    if not kotrack_reset_session:
+        raise HTTPException(status_code=400, detail="No valid reset session")
     try:
-        user = reset_password(
-            db,
-            reset_request=reset_request,
-            code=reset_data.code,
-            new_password=reset_data.new_password,
-        )
-
+        complete_password_reset(db, raw_session=kotrack_reset_session, new_password=reset_data.new_password)
         db.commit()
-
-        return {
-            "message": "Password reset successful",
-            "user_id": user.id,
-        }
-
+        response.delete_cookie("kotrack_reset_session", path="/api/auth/password-reset", httponly=True, samesite="strict")
+        return {"message": "Password reset completed"}
     except ValueError as exc:
         db.rollback()
-
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
