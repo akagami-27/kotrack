@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, Index, String, Text, func, text
+from sqlalchemy import Boolean, DateTime, Enum, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -9,26 +9,11 @@ from app.models.enums import UserRole
 
 class User(Base):
     __tablename__ = "users"
-    __table_args__ = (
-        Index(
-            "uq_users_email_lower",
-            text("lower(email)"),
-            unique=True,
-            postgresql_where=text("email IS NOT NULL"),
-            sqlite_where=text("email IS NOT NULL"),
-        ),
-    )
-
     id: Mapped[int] = mapped_column(primary_key=True)
 
     name: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
-    )
-
-    email: Mapped[str | None] = mapped_column(
-        String(320),
-        nullable=True,
     )
 
     password_hash: Mapped[str] = mapped_column(

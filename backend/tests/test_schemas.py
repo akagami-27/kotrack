@@ -38,3 +38,14 @@ def test_login_request_rejects_short_password():
             name="Akagami",
             password="123",
         )
+
+
+def test_registration_ignores_legacy_optional_email_payload():
+    user = UserCreate(
+        name="Akagami",
+        password="Password123!",
+        email="legacy-client@example.test",
+    )
+
+    assert user.name == "Akagami"
+    assert not hasattr(user, "email")

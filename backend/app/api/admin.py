@@ -10,12 +10,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import require_admin
+from app.core.dependencies import require_admin, require_super_admin
 from app.db.session import get_db
 from app.models.password_reset import PasswordResetRequest
 from app.models.user import User
 from app.services.admin_service import get_admin_analytics
-from app.services.password_reset_service import approve_password_reset
+from app.services.password_reset_service import decide_password_reset
 
 
 router = APIRouter(
@@ -43,19 +43,19 @@ def get_admin_analytics_endpoint(
 
 @router.get("/password-reset-requests")
 def get_password_reset_requests(
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ):
     """
     Return pending password-reset requests.
 
-    Passwords, password hashes, and reset-code hashes are never returned.
+    No credentials or browser session material are returned.
     """
 
     requests = db.execute(
         select(PasswordResetRequest)
         .where(
-            PasswordResetRequest.used.is_(False),
+            PasswordResetRequest.status == "PENDING",
         )
         .order_by(
             PasswordResetRequest.created_at.asc()
@@ -69,7 +69,7 @@ def get_password_reset_requests(
             "username": reset_request.user.name,
             "created_at": reset_request.created_at,
             "approved_at": reset_request.approved_at,
-            "expires_at": reset_request.expires_at,
+            "status": reset_request.status,
         }
         for reset_request in requests
     ]
@@ -78,20 +78,19 @@ def get_password_reset_requests(
 @router.post("/password-reset-requests/{request_id}/approve")
 def approve_password_reset_request(
     request_id: int,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ):
     """
     Approve a pending password-reset request.
 
-    Generates a secure one-time reset code for the administrator
-    to provide directly to the verified user.
+    Authorizes the request-bound browser session after identity review.
     """
 
     reset_request = db.execute(
         select(PasswordResetRequest).where(
             PasswordResetRequest.id == request_id,
-            PasswordResetRequest.used.is_(False),
+            PasswordResetRequest.status == "PENDING",
         )
     ).scalar_one_or_none()
 
@@ -101,6 +100,12 @@ def approve_password_reset_request(
             detail="Password reset request not found",
         )
 
+    if reset_request.user_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrators cannot approve their own password reset requests",
+        )
+
     if not reset_request.user.is_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -108,11 +113,7 @@ def approve_password_reset_request(
         )
 
     try:
-        code = approve_password_reset(
-            db,
-            reset_request=reset_request,
-            admin=current_user,
-        )
+        reset_request = decide_password_reset(db, request_id=request_id, admin=current_user, approve=True)
 
         db.commit()
 
@@ -120,14 +121,57 @@ def approve_password_reset_request(
             "message": "Password reset approved",
             "request_id": reset_request.id,
             "username": reset_request.user.name,
-            "code": code,
-            "expires_at": reset_request.expires_at,
+            "status": reset_request.status,
         }
 
     except ValueError as exc:
         db.rollback()
 
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post("/password-reset-requests/{request_id}/reject")
+def reject_password_reset_request(
+    request_id: int,
+    current_user: User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Reject a pending request and retain administrator audit metadata."""
+    reset_request = db.execute(
+        select(PasswordResetRequest).where(
+            PasswordResetRequest.id == request_id,
+            PasswordResetRequest.status == "PENDING",
+        )
+    ).scalar_one_or_none()
+
+    if reset_request is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Pending password reset request not found",
+        )
+
+    if reset_request.user_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrators cannot reject their own password reset requests",
+        )
+
+    try:
+        reset_request = decide_password_reset(db, request_id=request_id, admin=current_user, approve=False)
+        db.commit()
+        return {
+            "message": "Password reset request rejected",
+            "request_id": reset_request.id,
+            "status": "REJECTED",
+            "rejected_by": current_user.id,
+            "rejected_at": reset_request.rejected_at,
+        }
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         ) from exc

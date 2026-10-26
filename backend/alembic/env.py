@@ -40,6 +40,19 @@ if database_url:
 target_metadata = Base.metadata
 
 
+def include_object(object_, name, type_, reflected, compare_to):
+    """Keep the removed legacy email column/index in historical DBs."""
+    if reflected and type_ == "column" and name == "email" and getattr(object_.table, "name", None) == "users":
+        return False
+    if reflected and type_ == "column" and getattr(object_.table, "name", None) == "password_reset_requests" and name in {"code_hash", "expires_at", "attempts"}:
+        return False
+    if reflected and type_ == "index" and name == "uq_users_email_lower":
+        return False
+    if reflected and type_ == "index" and name == "ix_password_reset_requests_expires_at":
+        return False
+    return True
+
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode (emits SQL, no DB connection needed)."""
     url = config.get_main_option("sqlalchemy.url")
@@ -49,6 +62,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -68,6 +82,7 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             compare_type=True,
+            include_object=include_object,
         )
 
         with context.begin_transaction():
