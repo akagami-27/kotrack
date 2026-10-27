@@ -34,3 +34,5 @@ Thumbs.db
 # Installer / binary files
 *.exe
 *.msi
+# Local database backups
+backups/
