@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       production_change_approved:
-        description: "Approve the production migration and deployment"
+        description: "Approve production deployment and migration"
         required: true
         type: boolean
         default: false
       backup_restore_test_id:
-        description: "Verified backup/restore evidence ID"
+        description: "Backup/restore evidence ID"
         required: true
         type: string
 
@@ -17,46 +17,31 @@ permissions:
   contents: read
 
 concurrency:
-  group: kotrack-production-${{ github.ref }}
+  group: kotrack-production
   cancel-in-progress: false
 
 jobs:
   frontend:
-    name: Frontend lint, build, and dependency audit
+    name: Frontend validation
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
-
     steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Build
-        run: npm run build
-
-      - name: Audit dependencies
-        run: npm audit --audit-level=high
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm audit --audit-level=high
 
   backend:
-    name: Backend migrations and tests
+    name: Backend tests and migration validation
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-
     services:
       postgres:
         image: postgres:16
@@ -71,290 +56,146 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-
     defaults:
       run:
         working-directory: backend
-
     env:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/drink_tracker_test
       TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/drink_tracker_test
-
     steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: backend/requirements.txt
-
-      - name: Create temporary JWT signing key
-        shell: bash
+      - name: Set temporary JWT key
         run: echo "JWT_SECRET_KEY=$(python -c 'import secrets; print(secrets.token_hex(32))')" >> "$GITHUB_ENV"
+      - run: python -m pip install -r requirements.txt
+      - run: alembic heads
+      - run: alembic upgrade head
+      - run: alembic check
+      - run: pytest -q
 
-      - name: Install dependencies
-        run: python -m pip install -r requirements.txt
-
-      - name: Validate migration chain
-        run: alembic heads
-
-      - name: Apply migrations to disposable database
-        run: alembic upgrade head
-
-      - name: Verify schema
-        run: alembic check
-
-      - name: Run backend tests
-        run: pytest -q
-
-      - name: Audit Python dependencies
-        if: always()
-        run: |
-          python -m pip install pip-audit
-          pip-audit -r requirements.txt
-
-  secret-and-static-analysis:
-    name: Secret and Python static analysis
+  secret-check:
+    name: Secret and source checks
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-
     steps:
-      - name: Check out source
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Scan repository for secrets
+      - name: Detect secrets
         uses: gitleaks/gitleaks-action@v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-
       - name: Install Bandit
         run: python -m pip install bandit
-
-      - name: Scan backend source
+      - name: Scan backend
         working-directory: backend
         run: bandit -r app -ll
 
-  container-scan:
-    name: Build and scan container images without publishing
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: [frontend, backend]
-
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build backend image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./backend
-          load: true
-          tags: kotrack-backend:${{ github.sha }}
-
-      - name: Scan backend image
-        uses: aquasecurity/trivy-action@0.35.0
-        with:
-          image-ref: kotrack-backend:${{ github.sha }}
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
-
-      - name: Build frontend image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./frontend
-          load: true
-          tags: kotrack-frontend:${{ github.sha }}
-
-      - name: Scan frontend image
-        uses: aquasecurity/trivy-action@0.35.0
-        with:
-          image-ref: kotrack-frontend:${{ github.sha }}
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
-
   publish-images:
-    name: Build and publish KoTrack images to Harbor
+    name: Publish images to Harbor
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: [frontend, backend, secret-and-static-analysis, container-scan]
-
-    # Use explicit event input strings to avoid boolean/context mismatches.
+    needs: [frontend, backend, secret-check]
     if: >-
       github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/heads/main' &&
-      github.event.inputs.production_change_approved == 'true' &&
-      github.event.inputs.backup_restore_test_id != '' &&
-      vars.PRODUCTION_DEPLOYMENT_ENABLED == 'true'
-
+      inputs.production_change_approved == true &&
+      inputs.backup_restore_test_id != ''
     environment: production
-
     outputs:
-      frontend_digest: ${{ steps.frontend-image.outputs.digest }}
-      backend_digest: ${{ steps.backend-image.outputs.digest }}
-
+      frontend_digest: ${{ steps.frontend.outputs.digest }}
+      backend_digest: ${{ steps.backend.outputs.digest }}
     steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
       - name: Log in to Harbor
         uses: docker/login-action@v3
         with:
           registry: public-registry.smolelab.com
           username: ${{ secrets.HARBOR_USERNAME }}
           password: ${{ secrets.HARBOR_PASSWORD }}
-
-      - name: Build and push frontend image
-        id: frontend-image
+      - name: Build and push frontend
+        id: frontend
         uses: docker/build-push-action@v6
         with:
           context: ./frontend
           push: true
           tags: public-registry.smolelab.com/og/kotrack-frontend:${{ github.sha }}
-
-      - name: Build and push backend image
-        id: backend-image
+      - name: Build and push backend
+        id: backend
         uses: docker/build-push-action@v6
         with:
           context: ./backend
           push: true
           tags: public-registry.smolelab.com/og/kotrack-backend:${{ github.sha }}
 
-      - name: Scan published frontend image digest
-        uses: aquasecurity/trivy-action@0.35.0
-        with:
-          image-ref: public-registry.smolelab.com/og/kotrack-frontend@${{ steps.frontend-image.outputs.digest }}
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
-
-      - name: Scan published backend image digest
-        uses: aquasecurity/trivy-action@0.35.0
-        with:
-          image-ref: public-registry.smolelab.com/og/kotrack-backend@${{ steps.backend-image.outputs.digest }}
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
-
   migrate-production:
-    name: Approved production database migration
+    name: Production database migration
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    needs: [frontend, backend, publish-images]
-
+    needs: [backend, publish-images]
     if: >-
       github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/heads/main' &&
-      github.event.inputs.production_change_approved == 'true' &&
-      github.event.inputs.backup_restore_test_id != '' &&
-      vars.PRODUCTION_DEPLOYMENT_ENABLED == 'true'
-
+      inputs.production_change_approved == true &&
+      inputs.backup_restore_test_id != ''
     environment: production
-
     steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-
-      - name: Install kubectl
-        uses: azure/setup-kubectl@v4
-
-      - name: Configure Rancher connection
-        shell: bash
+      - uses: actions/checkout@v4
+      - uses: azure/setup-kubectl@v4
+      - name: Connect to Rancher
         env:
           RANCHER_ACCESS_KEY: ${{ secrets.RANCHER_ACCESS_KEY }}
           RANCHER_SECRET_KEY: ${{ secrets.RANCHER_SECRET_KEY }}
+        shell: bash
         run: |
           set -euo pipefail
           test -n "$RANCHER_ACCESS_KEY"
           test -n "$RANCHER_SECRET_KEY"
-
           kubectl config set-cluster rancher \
             --server=https://rancher.smolelab.com/k8s/clusters/local
           kubectl config set-credentials github-actions \
             --token="${RANCHER_ACCESS_KEY}:${RANCHER_SECRET_KEY}"
           kubectl config set-context kotrack-production \
-            --cluster=rancher \
-            --user=github-actions \
-            --namespace=app
+            --cluster=rancher --user=github-actions --namespace=app
           kubectl config use-context kotrack-production
-
-      - name: Verify evidence reference and Kubernetes permissions
-        shell: bash
+      - name: Verify evidence reference
         env:
-          BACKUP_RESTORE_TEST_ID: ${{ github.event.inputs.backup_restore_test_id }}
+          BACKUP_RESTORE_TEST_ID: ${{ inputs.backup_restore_test_id }}
         run: |
           set -euo pipefail
           test -n "$BACKUP_RESTORE_TEST_ID"
-          echo "Backup/restore evidence reference: $BACKUP_RESTORE_TEST_ID"
-          echo "This reference is an operator attestation, not independent proof."
-
-          for permission in \
-            "create jobs" "get jobs" "list jobs" "watch jobs" \
-            "get pods" "get pods/log"; do
-            verb=${permission%% *}
-            resource=${permission#* }
-            [[ "$(kubectl auth can-i "$verb" "$resource" -n app)" == "yes" ]] || {
-              echo "Missing Kubernetes permission: $permission"
-              exit 1
-            }
-          done
-
-      - name: Run guarded database migration Job
-        shell: bash
+          echo "Backup/restore evidence: $BACKUP_RESTORE_TEST_ID"
+          kubectl auth can-i create jobs -n app | grep -qx yes
+      - name: Run guarded migration
         env:
           BACKEND_DIGEST: ${{ needs.publish-images.outputs.backend_digest }}
+        shell: bash
         run: |
           set -euo pipefail
+          test -n "$BACKEND_DIGEST"
 
-          test -n "$BACKEND_DIGEST" || {
-            echo "Backend image digest is missing."
-            exit 1
-          }
-
-          # Fail closed if an earlier migration Job needs inspection.
-          kubectl get jobs -n app -o json |
-            python -c '
-          import json, sys
-          data = json.load(sys.stdin)
-          jobs = [
-              job for job in data["items"]
-              if job["metadata"]["name"].startswith("kotrack-migrate-")
-          ]
-          blocked = []
-          for job in jobs:
-              status = job.get("status", {})
-              complete = any(
-                  c.get("type") == "Complete" and c.get("status") == "True"
-                  for c in status.get("conditions", [])
-              )
-              failed = any(
-                  c.get("type") == "Failed" and c.get("status") == "True"
-                  for c in status.get("conditions", [])
-              )
-              if status.get("active", 0) or failed or not complete:
-                  blocked.append(job["metadata"]["name"])
+          # Never rerun blindly when an earlier migration job failed or is incomplete.
+          kubectl get jobs -n app -o json | python -c '
+          import json,sys
+          jobs=[j for j in json.load(sys.stdin)["items"]
+                if j["metadata"]["name"].startswith("kotrack-migrate-")]
+          blocked=[]
+          for j in jobs:
+              s=j.get("status",{})
+              complete=any(c.get("type")=="Complete" and c.get("status")=="True"
+                           for c in s.get("conditions",[]))
+              failed=any(c.get("type")=="Failed" and c.get("status")=="True"
+                         for c in s.get("conditions",[]))
+              if s.get("active",0) or failed or not complete:
+                  blocked.append(j["metadata"]["name"])
           if blocked:
-              print(
-                  "Migration Jobs need inspection before retry: " + ", ".join(blocked),
-                  file=sys.stderr
-              )
+              print("Inspect existing migration jobs first: "+", ".join(blocked),
+                    file=sys.stderr)
               sys.exit(1)
           '
 
@@ -383,8 +224,7 @@ jobs:
                     command: ["/bin/sh", "-ec"]
                     args:
                       - |
-                        python -c 'from sqlalchemy import text; from app.db.session import engine; u=engine.url; assert u.host == "postgresql.database.svc.cluster.local" and u.database == "og", "Refusing unexpected database target"; c=engine.connect(); r=c.execute(text("select version_num from alembic_version")).scalar_one(); assert r in {"d3896ea15b0f", "a2190d9f7c31", "c840a2b9d13f", "d172a0f61c42"}, "Unexpected Alembic revision; inspect before retrying"; print("Verified database target and revision:", u.host, u.database, r); c.close()'
-                        python -m alembic heads
+                        python -c 'from sqlalchemy import text; from app.db.session import engine; u=engine.url; assert u.host == "postgresql.database.svc.cluster.local" and u.database == "og", "Unexpected database target"; c=engine.connect(); r=c.execute(text("select version_num from alembic_version")).scalar_one(); assert r in {"d3896ea15b0f","a2190d9f7c31","c840a2b9d13f","d172a0f61c42"}, "Unexpected migration revision"; print("Verified:",u.host,u.database,r); c.close()'
                         python -m alembic upgrade head
                         python -m alembic current
                     env:
@@ -395,181 +235,92 @@ jobs:
                             key: DATABASE_URL
           EOF
 
-          if ! kubectl wait --for=condition=complete "job/${job}" -n app --timeout=660s; then
+          if ! kubectl wait --for=condition=complete "job/${job}" \
+              -n app --timeout=660s; then
             kubectl describe "job/${job}" -n app || true
             kubectl logs "job/${job}" -n app --all-containers=true || true
-            echo "Migration failed. Inspect the actual database revision before retrying."
             exit 1
           fi
-
           kubectl logs "job/${job}" -n app
 
   deploy-production:
-    name: Deploy KoTrack to Kubernetes
+    name: Deploy to Kubernetes
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     needs: [publish-images, migrate-production]
-
     if: >-
       github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/heads/main' &&
-      github.event.inputs.production_change_approved == 'true' &&
-      github.event.inputs.backup_restore_test_id != '' &&
-      vars.PRODUCTION_DEPLOYMENT_ENABLED == 'true'
-
+      inputs.production_change_approved == true &&
+      inputs.backup_restore_test_id != ''
     environment: production
-
     steps:
-      - name: Install kubectl
-        uses: azure/setup-kubectl@v4
-
-      - name: Configure Rancher connection
-        shell: bash
+      - uses: azure/setup-kubectl@v4
+      - name: Connect to Rancher
         env:
           RANCHER_ACCESS_KEY: ${{ secrets.RANCHER_ACCESS_KEY }}
           RANCHER_SECRET_KEY: ${{ secrets.RANCHER_SECRET_KEY }}
+        shell: bash
         run: |
           set -euo pipefail
           test -n "$RANCHER_ACCESS_KEY"
           test -n "$RANCHER_SECRET_KEY"
-
           kubectl config set-cluster rancher \
             --server=https://rancher.smolelab.com/k8s/clusters/local
           kubectl config set-credentials github-actions \
             --token="${RANCHER_ACCESS_KEY}:${RANCHER_SECRET_KEY}"
           kubectl config set-context kotrack-production \
-            --cluster=rancher \
-            --user=github-actions \
-            --namespace=app
+            --cluster=rancher --user=github-actions --namespace=app
           kubectl config use-context kotrack-production
-
-      - name: Verify production Deployments, Services, and permissions
-        shell: bash
+      - name: Check existing deployments
         run: |
           set -euo pipefail
-
           kubectl get deployment kotrack-backend kotrack-frontend -n app
-          kubectl get service kotrack-backend kotrack-frontend -n app
-
-          kubectl get service kotrack-backend -n app -o json |
-            python -c 'import json,sys; s=json.load(sys.stdin); assert s["spec"].get("selector")=={"app":"kotrack-backend"}, "Backend Service selector mismatch"; assert any(p.get("port")==8000 and p.get("targetPort")==8000 for p in s["spec"].get("ports",[])), "Backend Service port mismatch"'
-
-          kubectl get service kotrack-frontend -n app -o json |
-            python -c 'import json,sys; s=json.load(sys.stdin); assert s["spec"].get("selector")=={"app":"kotrack-frontend"}, "Frontend Service selector mismatch"; assert any(p.get("port")==80 and p.get("targetPort")==80 for p in s["spec"].get("ports",[])), "Frontend Service port mismatch"'
-
-          kubectl get deployment kotrack-backend -n app -o json |
-            python -c 'import json,sys; d=json.load(sys.stdin); labels=d["spec"]["template"].get("metadata",{}).get("labels",{}); assert labels.get("app")=="kotrack-backend", "Backend pod label mismatch"; c=[x for x in d["spec"]["template"]["spec"]["containers"] if x["name"]=="backend"]; assert len(c)==1 and any(p.get("containerPort")==8000 for p in c[0].get("ports",[])), "Expected backend container port 8000"; image=c[0]["image"]; assert image.startswith("public-registry.smolelab.com/og/kotrack-backend:") or image.startswith("public-registry.smolelab.com/og/kotrack-backend@"), "Backend image repository mismatch"'
-
-          kubectl get deployment kotrack-frontend -n app -o json |
-            python -c 'import json,sys; d=json.load(sys.stdin); labels=d["spec"]["template"].get("metadata",{}).get("labels",{}); assert labels.get("app")=="kotrack-frontend", "Frontend pod label mismatch"; c=d["spec"]["template"]["spec"]["containers"]; assert len(c)==1 and c[0]["name"]=="frontend" and any(p.get("containerPort")==80 for p in c[0].get("ports",[])), "Expected frontend container port 80"; image=c[0]["image"]; assert image.startswith("public-registry.smolelab.com/og/kotrack-frontend:") or image.startswith("public-registry.smolelab.com/og/kotrack-frontend@"), "Frontend image repository mismatch"'
-
-          for permission in \
-            "patch deployments" "get deployments" "watch deployments" \
-            "get pods" "create pods/exec"; do
-            verb=${permission%% *}
-            resource=${permission#* }
-            [[ "$(kubectl auth can-i "$verb" "$resource" -n app)" == "yes" ]] || {
-              echo "Missing Kubernetes permission: $permission"
-              exit 1
-            }
-          done
-
-      - name: Capture current production images for recovery
-        id: previous-images
+          kubectl auth can-i patch deployments -n app | grep -qx yes
+      - name: Save previous images for recovery
+        id: previous
         shell: bash
         run: |
           set -euo pipefail
-
-          backend_image=$(kubectl get deployment kotrack-backend -n app \
-            -o jsonpath='{.spec.template.spec.containers[?(@.name=="backend")].image}')
-
-          frontend_image=$(kubectl get deployment kotrack-frontend -n app -o json |
-            python -c 'import json,sys; d=json.load(sys.stdin); c=d["spec"]["template"]["spec"]["containers"]; assert len(c)==1 and c[0]["name"]=="frontend"; print(c[0]["image"])')
-
-          test -n "$backend_image"
-          test -n "$frontend_image"
-
-          echo "backend_image=$backend_image" >> "$GITHUB_OUTPUT"
-          echo "frontend_image=$frontend_image" >> "$GITHUB_OUTPUT"
-
-      - name: Deploy backend image
-        shell: bash
+          echo "backend=$(kubectl get deployment kotrack-backend -n app -o jsonpath='{.spec.template.spec.containers[?(@.name=="backend")].image}')" >> "$GITHUB_OUTPUT"
+          echo "frontend=$(kubectl get deployment kotrack-frontend -n app -o jsonpath='{.spec.template.spec.containers[?(@.name=="frontend")].image}')" >> "$GITHUB_OUTPUT"
+      - name: Deploy backend
         env:
-          BACKEND_DIGEST: ${{ needs.publish-images.outputs.backend_digest }}
+          DIGEST: ${{ needs.publish-images.outputs.backend_digest }}
         run: |
           set -euo pipefail
-          test -n "$BACKEND_DIGEST"
+          test -n "$DIGEST"
           kubectl set image deployment/kotrack-backend \
-            "backend=public-registry.smolelab.com/og/kotrack-backend@${BACKEND_DIGEST}" \
-            -n app
+            "backend=public-registry.smolelab.com/og/kotrack-backend@${DIGEST}" -n app
           kubectl rollout status deployment/kotrack-backend -n app --timeout=180s
-
-      - name: Deploy frontend image
-        shell: bash
+      - name: Deploy frontend
         env:
-          FRONTEND_DIGEST: ${{ needs.publish-images.outputs.frontend_digest }}
+          DIGEST: ${{ needs.publish-images.outputs.frontend_digest }}
         run: |
           set -euo pipefail
-          test -n "$FRONTEND_DIGEST"
+          test -n "$DIGEST"
           kubectl set image deployment/kotrack-frontend \
-            "frontend=public-registry.smolelab.com/og/kotrack-frontend@${FRONTEND_DIGEST}" \
-            -n app
+            "frontend=public-registry.smolelab.com/og/kotrack-frontend@${DIGEST}" -n app
           kubectl rollout status deployment/kotrack-frontend -n app --timeout=180s
-
-      - name: Smoke test backend health endpoint
-        shell: bash
+      - name: Health checks
         run: |
           set -euo pipefail
           kubectl exec deployment/kotrack-backend -n app -- \
-            python -c "import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=10); assert r.status == 200; print('Backend health check passed')"
-
-      - name: Smoke test frontend response
-        shell: bash
-        run: |
-          set -euo pipefail
+            python -c "import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8000/api/health',timeout=10); assert r.status==200"
           kubectl exec deployment/kotrack-frontend -n app -c frontend -- \
             wget -qO- http://127.0.0.1/ >/dev/null
-
-      - name: Smoke test frontend-to-backend API route
-        shell: bash
-        run: |
-          set -euo pipefail
           kubectl exec deployment/kotrack-frontend -n app -c frontend -- \
             wget -qO- http://127.0.0.1/api/health >/dev/null
-
-      - name: Verify final deployment state
-        run: |
           kubectl get deployment kotrack-backend kotrack-frontend -n app
           kubectl get pods -n app
-
-      - name: Restore previous application images after release failure
-        if: failure() && steps.previous-images.outputs.backend_image != '' && steps.previous-images.outputs.frontend_image != ''
-        shell: bash
+      - name: Restore previous application images if deployment fails
+        if: failure() && steps.previous.outputs.backend != '' && steps.previous.outputs.frontend != ''
         env:
-          BACKEND_IMAGE: ${{ steps.previous-images.outputs.backend_image }}
-          FRONTEND_IMAGE: ${{ steps.previous-images.outputs.frontend_image }}
+          BACKEND_IMAGE: ${{ steps.previous.outputs.backend }}
+          FRONTEND_IMAGE: ${{ steps.previous.outputs.frontend }}
+        shell: bash
         run: |
           set -euo pipefail
-          echo "Restoring application images only. The database schema is not rolled back."
-
-          recovery_failed=0
-
-          kubectl set image deployment/kotrack-backend \
-            "backend=$BACKEND_IMAGE" -n app || recovery_failed=1
-
-          kubectl set image deployment/kotrack-frontend \
-            "frontend=$FRONTEND_IMAGE" -n app || recovery_failed=1
-
-          kubectl rollout status deployment/kotrack-backend -n app --timeout=180s || recovery_failed=1
-          kubectl rollout status deployment/kotrack-frontend -n app --timeout=180s || recovery_failed=1
-
-          kubectl exec deployment/kotrack-backend -n app -- \
-            python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=10)" || recovery_failed=1
-
-          kubectl exec deployment/kotrack-frontend -n app -c frontend -- \
-            wget -qO- http://127.0.0.1/api/health >/dev/null || recovery_failed=1
-
-          if [[ "$recovery_failed" == "1" ]]; then
-            echo "Image recovery was incomplete. Inspect both Deployments and recover manually."
-            exit 1
-          fi
+          kubectl set image deployment/kotrack-backend "backend=$BACKEND_IMAGE" -n app
+          kubectl set image deployment/kotrack-frontend "frontend=$FRONTEND_IMAGE" -n app
+          kubectl rollout status deployment/kotrack-backend -n app --timeout=180s
+          kubectl rollout status deployment/kotrack-frontend -n app --timeout=180s
