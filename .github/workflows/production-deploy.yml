@@ -124,26 +124,35 @@ jobs:
           DEPLOYMENT_ENABLED: ${{ vars.PRODUCTION_DEPLOYMENT_ENABLED }}
         run: |
           set -euo pipefail
-          failed=0
 
-          echo "Event: $EVENT_NAME"
-          echo "Ref: $REF"
-          echo "Production approval selected: ${APPROVED:-false}"
+          echo "Event: ${EVENT_NAME}"
+          echo "Ref: ${REF}"
+          echo "Production approval selected: ${APPROVED}"
+
           if [[ -n "${BACKUP_EVIDENCE_ID:-}" ]]; then
             echo "Backup/restore evidence ID supplied: yes"
           else
             echo "::error::Backup/restore evidence ID is empty."
-            failed=1
+            exit 1
           fi
-          echo "PRODUCTION_DEPLOYMENT_ENABLED: ${DEPLOYMENT_ENABLED:-NOT SET}"
 
-          [[ "$EVENT_NAME" == "workflow_dispatch" ]] || { echo "::error::Run this workflow manually."; failed=1; }
-          [[ "$REF" == "refs/heads/main" ]] || { echo "::error::Select the main branch."; failed=1; }
-          [[ "$APPROVED" == "true" ]] || { echo "::error::Select production_change_approved=true in the Run workflow form."; failed=1; }
-          [[ "${DEPLOYMENT_ENABLED:-}" == "true" ]] || { echo "::error::Set repository variable PRODUCTION_DEPLOYMENT_ENABLED to exactly true."; failed=1; }
+          if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
+            echo "::error::Workflow must be manually dispatched."
+            exit 1
+          fi
 
-          if [[ "$failed" -ne 0 ]]; then
-            echo "::error::Production gate failed. No images will be published and production will not be changed."
+          if [[ "$REF" != "refs/heads/main" ]]; then
+            echo "::error::Workflow must run from main."
+            exit 1
+          fi
+
+          if [[ "$APPROVED" != "true" ]]; then
+            echo "::error::Production approval input must be true."
+            exit 1
+          fi
+
+          if [[ "${DEPLOYMENT_ENABLED:-}" != "true" ]]; then
+            echo "::error::PRODUCTION_DEPLOYMENT_ENABLED must equal true."
             exit 1
           fi
 
