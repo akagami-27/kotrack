@@ -151,8 +151,13 @@ jobs:
             exit 1
           fi
 
-          if [[ "${DEPLOYMENT_ENABLED:-}" != "true" ]]; then
-            echo "::error::PRODUCTION_DEPLOYMENT_ENABLED must equal true."
+          # Normalize whitespace/case so invisible characters don't cause a false failure.
+          DEPLOYMENT_ENABLED_NORMALIZED="$(printf '%s' "${DEPLOYMENT_ENABLED:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+          printf 'Deployment flag raw shell representation: %q\n' "${DEPLOYMENT_ENABLED:-}"
+          printf 'Deployment flag normalized: %s\n' "${DEPLOYMENT_ENABLED_NORMALIZED:-EMPTY}"
+
+          if [[ "$DEPLOYMENT_ENABLED_NORMALIZED" != "true" ]]; then
+            echo "::error::PRODUCTION_DEPLOYMENT_ENABLED must normalize to true. Check the repository Actions variable value and remove extra characters."
             exit 1
           fi
 
