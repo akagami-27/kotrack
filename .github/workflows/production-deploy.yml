@@ -233,6 +233,11 @@ jobs:
                           secretKeyRef:
                             name: kotrack-secrets
                             key: DATABASE_URL
+                      - name: JWT_SECRET_KEY
+                        valueFrom:
+                          secretKeyRef:
+                            name: kotrack-secrets
+                            key: JWT_SECRET_KEY
           EOF
 
           if ! kubectl wait --for=condition=complete "job/${job}" \
