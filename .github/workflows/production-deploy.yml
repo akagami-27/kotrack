@@ -117,7 +117,8 @@ jobs:
       github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/heads/main' &&
       inputs.production_change_approved == true &&
-      inputs.backup_restore_test_id != ''
+      inputs.backup_restore_test_id != '' &&
+      vars.PRODUCTION_DEPLOYMENT_ENABLED == 'true'
     environment: production
 
     outputs:
@@ -159,7 +160,8 @@ jobs:
       github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/heads/main' &&
       inputs.production_change_approved == true &&
-      inputs.backup_restore_test_id != ''
+      inputs.backup_restore_test_id != '' &&
+      vars.PRODUCTION_DEPLOYMENT_ENABLED == 'true'
     environment: production
 
     steps:
@@ -206,9 +208,7 @@ jobs:
           set -euo pipefail
           test -n "$BACKEND_DIGEST"
 
-          # Block active or unfinished jobs. A failed, terminated job is
-          # allowed past this check, but the database revision is verified
-          # inside the new Job before Alembic is allowed to run.
+          # Block active or unfinished migration jobs.
           kubectl get jobs -n app -o json | python -c '
           import json, sys
 
@@ -218,7 +218,6 @@ jobs:
           ]
 
           blocked = []
-
           for j in jobs:
               status = j.get("status", {})
               conditions = status.get("conditions", [])
@@ -231,7 +230,6 @@ jobs:
                   c.get("type") == "Failed" and c.get("status") == "True"
                   for c in conditions
               )
-
               active = status.get("active", 0) or 0
 
               if active or (not complete and not failed):
@@ -251,8 +249,6 @@ jobs:
           job="kotrack-migrate-${GITHUB_SHA:0:8}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           image="public-registry.smolelab.com/og/kotrack-backend@${BACKEND_DIGEST}"
 
-          # Verify the target and known migration revision before changing
-          # the production database.
           cat <<EOF | kubectl create -f -
           apiVersion: batch/v1
           kind: Job
@@ -309,7 +305,8 @@ jobs:
       github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/heads/main' &&
       inputs.production_change_approved == true &&
-      inputs.backup_restore_test_id != ''
+      inputs.backup_restore_test_id != '' &&
+      vars.PRODUCTION_DEPLOYMENT_ENABLED == 'true'
     environment: production
 
     steps:
@@ -339,6 +336,7 @@ jobs:
           kubectl config use-context kotrack-production
 
       - name: Check existing deployments and permissions
+        shell: bash
         run: |
           set -euo pipefail
           kubectl get deployment kotrack-backend kotrack-frontend -n app
@@ -351,13 +349,20 @@ jobs:
           set -euo pipefail
 
           backend_image="$(kubectl get deployment kotrack-backend -n app \
-            -o jsonpath='{.spec.template.spec.containers[?(@.name=="backend")].image}')"
+            -o jsonpath='{.spec.template.spec.containers[?(@.name=="kotrack-backend")].image}')"
 
           frontend_image="$(kubectl get deployment kotrack-frontend -n app \
-            -o jsonpath='{.spec.template.spec.containers[?(@.name=="frontend")].image}')"
+            -o jsonpath='{.spec.template.spec.containers[?(@.name=="kotrack-frontend")].image}')"
 
-          test -n "$backend_image"
-          test -n "$frontend_image"
+          if [[ -z "$backend_image" || -z "$frontend_image" ]]; then
+            echo "::error::Could not retrieve both current production image references."
+            echo "Backend image: ${backend_image:-EMPTY}"
+            echo "Frontend image: ${frontend_image:-EMPTY}"
+            exit 1
+          fi
+
+          echo "Previous backend image: $backend_image"
+          echo "Previous frontend image: $frontend_image"
 
           echo "backend=$backend_image" >> "$GITHUB_OUTPUT"
           echo "frontend=$frontend_image" >> "$GITHUB_OUTPUT"
@@ -365,12 +370,13 @@ jobs:
       - name: Deploy backend
         env:
           DIGEST: ${{ needs.publish-images.outputs.backend_digest }}
+        shell: bash
         run: |
           set -euo pipefail
           test -n "$DIGEST"
 
           kubectl set image deployment/kotrack-backend \
-            "backend=public-registry.smolelab.com/og/kotrack-backend@${DIGEST}" \
+            "kotrack-backend=public-registry.smolelab.com/og/kotrack-backend@${DIGEST}" \
             -n app
 
           kubectl rollout status deployment/kotrack-backend \
@@ -379,28 +385,30 @@ jobs:
       - name: Deploy frontend
         env:
           DIGEST: ${{ needs.publish-images.outputs.frontend_digest }}
+        shell: bash
         run: |
           set -euo pipefail
           test -n "$DIGEST"
 
           kubectl set image deployment/kotrack-frontend \
-            "frontend=public-registry.smolelab.com/og/kotrack-frontend@${DIGEST}" \
+            "kotrack-frontend=public-registry.smolelab.com/og/kotrack-frontend@${DIGEST}" \
             -n app
 
           kubectl rollout status deployment/kotrack-frontend \
             -n app --timeout=180s
 
       - name: Health checks
+        shell: bash
         run: |
           set -euo pipefail
 
           kubectl exec deployment/kotrack-backend -n app -- \
             python -c "import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8000/api/health',timeout=10); assert r.status == 200"
 
-          kubectl exec deployment/kotrack-frontend -n app -c frontend -- \
+          kubectl exec deployment/kotrack-frontend -n app -c kotrack-frontend -- \
             wget -qO- http://127.0.0.1/ >/dev/null
 
-          kubectl exec deployment/kotrack-frontend -n app -c frontend -- \
+          kubectl exec deployment/kotrack-frontend -n app -c kotrack-frontend -- \
             wget -qO- http://127.0.0.1/api/health >/dev/null
 
           kubectl get deployment kotrack-backend kotrack-frontend -n app
@@ -418,10 +426,10 @@ jobs:
           echo "Deployment failed. Restoring previous application images."
 
           kubectl set image deployment/kotrack-backend \
-            "backend=$BACKEND_IMAGE" -n app
+            "kotrack-backend=$BACKEND_IMAGE" -n app
 
           kubectl set image deployment/kotrack-frontend \
-            "frontend=$FRONTEND_IMAGE" -n app
+            "kotrack-frontend=$FRONTEND_IMAGE" -n app
 
           kubectl rollout status deployment/kotrack-backend \
             -n app --timeout=180s
