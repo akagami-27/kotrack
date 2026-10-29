@@ -68,6 +68,19 @@ type Payment = {
   created_at: string
 }
 
+type SessionFinancialBucket = {
+  total_sessions: number
+  total_packets: number | string
+  total_session_value: number | string
+}
+
+type FinancialBreakdown = {
+  my_assigned_sessions: SessionFinancialBucket
+  other_admins_sessions: SessionFinancialBucket
+  unassigned_sessions: SessionFinancialBucket
+  system_wide: SessionFinancialBucket
+}
+
 type AnalyticsResponse = {
   summary: {
     total_users: number
@@ -79,6 +92,7 @@ type AnalyticsResponse = {
     pending_payments: number
     pending_session_requests: number
   }
+  financial_breakdown?: FinancialBreakdown
   users: UserAnalytics[]
   highest_debt_users: UserAnalytics[]
   highest_spenders: HighestSpender[]
@@ -87,7 +101,7 @@ type AnalyticsResponse = {
 const PAGE_SIZE = 5
 
 export default function AdminDashboard() {
-  const { user } = useAuth()
+  const { user, updateUser } = useAuth()
 
   const [currentTime, setCurrentTime] = useState(() =>
     new Date().toLocaleTimeString('en-MY', {
@@ -113,6 +127,9 @@ export default function AdminDashboard() {
   const [processingUserId, setProcessingUserId] = useState<number | null>(null)
   const [processingSessionId, setProcessingSessionId] = useState<number | null>(null)
   const [paymentProcessingId, setPaymentProcessingId] = useState<number | null>(null)
+  const [editingUserRole, setEditingUserRole] = useState<ManagedUser | null>(null)
+  const [selectedRole, setSelectedRole] = useState<'USER' | 'ADMIN'>('USER')
+  const [roleProcessing, setRoleProcessing] = useState(false)
 
   const [userSearch, setUserSearch] = useState('')
   const [userVisibleCount, setUserVisibleCount] = useState(PAGE_SIZE)
@@ -138,16 +155,23 @@ export default function AdminDashboard() {
   }, [])
 
   const loadUsers = useCallback(async () => {
-    try {
-      setUserError('')
-      const data = await apiRequest<ManagedUser[]>('/api/users/admin/all')
-      setUsers(data)
-    } catch (err) {
-      setUserError(err instanceof Error ? err.message : 'Unable to load users.')
-    } finally {
-      setLoadingUsers(false)
-    }
-  }, [])
+  try {
+    setUserError('')
+
+    const endpoint = isSuperAdminRole(user?.role)
+      ? '/api/users/super-admin/users'
+      : '/api/users/admin/all'
+
+    const data = await apiRequest<ManagedUser[]>(endpoint)
+    setUsers(data)
+  } catch (err) {
+    setUserError(
+      err instanceof Error ? err.message : 'Unable to load users.',
+    )
+  } finally {
+    setLoadingUsers(false)
+  }
+}, [user])
 
   const loadSessions = useCallback(async () => {
     try {
@@ -313,6 +337,36 @@ export default function AdminDashboard() {
     }
   }
 
+  async function handleChangeUserRole() {
+    if (!editingUserRole || roleProcessing || editingUserRole.role === selectedRole) {
+      return
+    }
+
+    const account = editingUserRole
+    setRoleProcessing(true)
+    setUserError('')
+
+    try {
+      const updated = await apiRequest<ManagedUser>(
+        `/api/users/super-admin/users/${account.id}/role`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ role: selectedRole }),
+        },
+      )
+
+      setUsers((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      )
+      if (updated.id === user?.id) updateUser(updated)
+      setEditingUserRole(null)
+    } catch (err) {
+      setUserError(err instanceof Error ? err.message : 'Unable to update user role.')
+    } finally {
+      setRoleProcessing(false)
+    }
+  }
+
   async function handleDeleteSession(sessionId: number) {
     setProcessingSessionId(sessionId)
     setSessionError('')
@@ -401,6 +455,42 @@ export default function AdminDashboard() {
 
   const totalRequestedPackets = totalConsumedPackets
   const approvedPackets = totalConsumedPackets
+
+  const financialBreakdown = analytics?.financial_breakdown
+
+  const renderSessionFinancialBucket = (
+    label: string,
+    bucket: SessionFinancialBucket | undefined,
+  ) => (
+    <div className="rounded-xl border border-cyan-300/[0.10] bg-black/20 p-3">
+      <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-white/45">
+        {label}
+      </p>
+
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <div>
+          <p className="text-[9px] text-white/35">Sessions</p>
+          <p className="mt-1 text-lg font-semibold">
+            {bucket?.total_sessions ?? 0}
+          </p>
+        </div>
+
+        <div>
+          <p className="text-[9px] text-white/35">Packets</p>
+          <p className="mt-1 text-lg font-semibold">
+            {Number(bucket?.total_packets ?? 0).toFixed(2)}
+          </p>
+        </div>
+
+        <div>
+          <p className="text-[9px] text-white/35">Session Value</p>
+          <p className="mt-1 text-sm font-semibold text-cyan-200">
+            {formatRM(Number(bucket?.total_session_value ?? 0))}
+          </p>
+        </div>
+      </div>
+    </div>
+  )
 
   const totalSessionValue = Math.max(
     Number(analytics?.summary.total_session_value ?? 0),
@@ -779,6 +869,84 @@ export default function AdminDashboard() {
             )}
           </section>
         </section>
+
+            {isSuperAdminRole(user?.role) && (
+        <section className="cyber-panel mt-5 rounded-2xl border border-cyan-300/[0.08] bg-black/20 p-4 sm:p-5">
+          <PanelHeader
+            code="FIN-02"
+            title="Session Financial Breakdown"
+            subtitle="SEPARATED BY SESSION HANDLER"
+          />
+
+          <p className="mt-2 text-xs leading-5 text-white/45">
+            Session values are grouped by assignment. The system-wide overview
+            includes assigned and unassigned sessions. Payment records are not
+            allocated to individual handlers, so these figures are not
+            handler-specific outstanding balances.
+          </p>
+
+          {analyticsLoading ? (
+            <LoadingBox text="Loading session financial breakdown..." />
+          ) : !financialBreakdown ? (
+            <EmptyBox
+              title="Financial breakdown unavailable."
+              description="Check the admin analytics API response."
+            />
+          ) : (
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              {renderSessionFinancialBucket(
+                'My Assigned Sessions',
+                financialBreakdown.my_assigned_sessions,
+              )}
+
+              {renderSessionFinancialBucket(
+                "Other Admins' Sessions",
+                financialBreakdown.other_admins_sessions,
+              )}
+
+              {renderSessionFinancialBucket(
+                'Unassigned Sessions',
+                financialBreakdown.unassigned_sessions,
+              )}
+
+              <div className="rounded-xl border border-cyan-300/20 bg-cyan-300/[0.04] p-3">
+                <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-cyan-200/70">
+                  System-Wide Overview
+                </p>
+
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <div>
+                    <p className="text-[9px] text-white/35">Sessions</p>
+                    <p className="mt-1 text-lg font-semibold">
+                      {financialBreakdown.system_wide.total_sessions}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-[9px] text-white/35">Packets</p>
+                    <p className="mt-1 text-lg font-semibold">
+                      {Number(
+                        financialBreakdown.system_wide.total_packets,
+                      ).toFixed(2)}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-[9px] text-white/35">Session Value</p>
+                    <p className="mt-1 text-sm font-semibold text-cyan-200">
+                      {formatRM(
+                        Number(
+                          financialBreakdown.system_wide.total_session_value,
+                        ),
+                      )}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
 
         {/* Pending payment approvals */}
         <section className="cyber-panel mt-5 rounded-2xl border border-cyan-300/[0.08] bg-black/20 p-4 sm:p-5">
@@ -1192,6 +1360,21 @@ export default function AdminDashboard() {
                             ? 'Deactivate'
                             : 'Activate'}
                       </button>
+                      {isSuperAdminRole(user?.role) &&
+                        account.role !== 'SUPER_ADMIN' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedRole(account.role === 'ADMIN' ? 'ADMIN' : 'USER')
+                              setUserError('')
+                              setEditingUserRole(account)
+                            }}
+                            disabled={roleProcessing}
+                            className="rounded-lg border border-cyan-300/10 bg-cyan-300/[0.04] px-3 py-2 text-[10px] font-medium text-cyan-200 transition hover:border-cyan-300/25 hover:bg-cyan-300/[0.08] disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            Change Role
+                          </button>
+                        )}
                     </div>
                   )
                 })}
@@ -1378,6 +1561,47 @@ export default function AdminDashboard() {
           KoTrack // Administration System // Secure Control Layer
         </p>
       </div>
+
+      {editingUserRole && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !roleProcessing) {
+              setEditingUserRole(null)
+            }
+          }}
+        >
+          <section role="dialog" aria-modal="true" aria-labelledby="change-role-title" className="w-full max-w-md rounded-2xl border border-cyan-300/15 bg-[#0b111b] p-5 shadow-2xl shadow-black/50">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-cyan-300/50">USER ACCESS CONTROL</p>
+                <h2 id="change-role-title" className="mt-2 text-lg font-semibold text-white">Change user role</h2>
+                <p className="mt-1 text-sm text-white/45">Select a role for {editingUserRole.name}.</p>
+              </div>
+              <button type="button" onClick={() => setEditingUserRole(null)} disabled={roleProcessing} aria-label="Close role selector" className="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-white/60 hover:bg-white/5 disabled:opacity-40">×</button>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              {(['USER', 'ADMIN'] as const).map((role) => (
+                <label key={role} className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/10 bg-white/[0.02] p-3 transition hover:border-cyan-300/20">
+                  <input type="radio" name="managed-user-role" value={role} checked={selectedRole === role} onChange={() => setSelectedRole(role)} disabled={roleProcessing} className="mt-1 accent-cyan-300" />
+                  <span>
+                    <span className="block text-sm font-medium text-white">{role === 'ADMIN' ? 'Admin' : 'User'}</span>
+                    <span className="mt-1 block text-xs text-white/40">{role === 'ADMIN' ? 'Administrative access to supported management features.' : 'Standard account access.'}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+
+            {userError && <div role="alert" className="mt-4 rounded-xl border border-red-400/15 bg-red-400/[0.06] px-3 py-2.5 text-xs text-red-300">{userError}</div>}
+
+            <div className="mt-6 flex justify-end gap-2">
+              <button type="button" onClick={() => setEditingUserRole(null)} disabled={roleProcessing} className="rounded-lg border border-white/10 px-4 py-2 text-xs text-white/60 transition hover:bg-white/5 disabled:opacity-40">Cancel</button>
+              <button type="button" onClick={() => void handleChangeUserRole()} disabled={roleProcessing || editingUserRole.role === selectedRole} className="rounded-lg border border-cyan-300/20 bg-cyan-300/[0.08] px-4 py-2 text-xs font-medium text-cyan-100 transition hover:bg-cyan-300/[0.13] disabled:cursor-not-allowed disabled:opacity-40">{roleProcessing ? 'Saving...' : 'Save Role'}</button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {editingSession && (
         <EditSessionModal

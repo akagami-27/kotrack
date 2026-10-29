@@ -43,30 +43,36 @@ export default function RequestSession() {
   const [requestId, setRequestId] = useState<number | null>(null)
 
   useEffect(() => {
-    async function loadUsers() {
-      try {
-        const [data, eligibleHandlers] = await Promise.all([
-          apiRequest<User[]>('/api/users'),
-          apiRequest<Handler[]>('/api/users/session-handlers'),
-        ])
+  async function loadUsers() {
+    try {
+      const data = await apiRequest<User[]>('/api/users')
 
-        setUsers(
-          data.filter((account) => account.is_active),
-        )
-        setHandlers(eligibleHandlers)
-      } catch (err) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : 'Unable to load users.',
-        )
-      } finally {
-        setLoadingUsers(false)
-      }
+      setUsers(
+        data.filter((account) => account.is_active),
+      )
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Unable to load participants.',
+      )
+    } finally {
+      setLoadingUsers(false)
     }
 
-    loadUsers()
-  }, [])
+    try {
+      const eligibleHandlers = await apiRequest<Handler[]>(
+        '/api/users/session-handlers',
+      )
+
+      setHandlers(eligibleHandlers)
+    } catch (err) {
+      console.error('Unable to load session handlers:', err)
+    }
+  }
+
+  loadUsers()
+}, [])
 
   function toggleParticipant(userId: number) {
     setSelectedParticipantIds((current) => {

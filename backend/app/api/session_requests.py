@@ -2,7 +2,8 @@
 Session request API endpoints.
 
 Normal users can submit and view their own requests.
-Admins can view and review requests assigned to them; super admins can review all.
+Regular admins can view and review unassigned requests or requests
+assigned to themselves. Super admins can review all requests.
 
 Only approved requests become actual DrinkSession records.
 """
@@ -13,7 +14,6 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import get_current_user, require_admin
 from app.db.session import get_db
 from app.models.enums import UserRole
-from app.models.session_request import SessionRequest
 from app.models.user import User
 from app.schemas.session_request import (
     SessionRequestCreate,
@@ -51,7 +51,7 @@ def create_request(
     """
 
     try:
-        request = create_session_request(
+        session_request = create_session_request(
             db,
             requested_by=current_user.id,
             session_date=request_data.session_date,
@@ -61,12 +61,11 @@ def create_request(
             handler_id=request_data.handler_id,
         )
 
-        # IMPORTANT:
         # Persist the request and its participant rows.
         db.commit()
-        db.refresh(request)
+        db.refresh(session_request)
 
-        return request
+        return session_request
 
     except ValueError as exc:
         db.rollback()
@@ -92,9 +91,9 @@ def list_my_requests(
     requests = get_session_requests(db)
 
     return [
-        request
-        for request in requests
-        if request.requested_by == current_user.id
+        session_request
+        for session_request in requests
+        if session_request.requested_by == current_user.id
     ]
 
 
@@ -107,14 +106,21 @@ def list_all_requests(
     db: Session = Depends(get_db),
 ):
     """
-    Return all session requests.
+    Return session requests visible to the current administrator.
 
-    ADMIN only.
+    Super admins can view all requests.
+    Regular admins can view unassigned requests and requests
+    assigned to themselves.
     """
 
     if current_user.role == UserRole.SUPER_ADMIN:
         return get_session_requests(db)
-    return get_session_requests(db, handler_id=current_user.id)
+
+    return get_session_requests(
+        db,
+        handler_id=current_user.id,
+        include_unassigned=True,
+    )
 
 
 @router.get(
@@ -129,39 +135,63 @@ def get_request(
     """
     Return a session request.
 
-    Users can only view their own requests.
-    Admins can view requests assigned to them; super admins can view all.
+    Users can view their own requests.
+    Regular admins can view unassigned requests or requests assigned
+    to themselves.
+    Super admins can view all requests.
     """
 
-    request = get_session_request(
+    session_request = get_session_request(
         db,
         request_id=request_id,
     )
 
-    if request is None:
+    if session_request is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Session request not found",
         )
 
     is_super_admin = current_user.role == UserRole.SUPER_ADMIN
-    is_assigned_admin = (
-        current_user.role == UserRole.ADMIN
-        and request.handler_id == current_user.id
+    is_admin = current_user.role == UserRole.ADMIN
+
+    is_admin_allowed = (
+        is_admin
+        and (
+            session_request.handler_id is None
+            or session_request.handler_id == current_user.id
+        )
     )
-    is_requester = request.requested_by == current_user.id
-    if not (is_super_admin or is_assigned_admin or is_requester):
+
+    is_requester = (
+        session_request.requested_by == current_user.id
+    )
+
+    # Requesters retain access to their own requests, except that a
+    # regular admin cannot bypass another administrator's assignment.
+    is_requester_allowed = (
+        is_requester
+        and (
+            not is_admin
+            or session_request.handler_id is None
+            or session_request.handler_id == current_user.id
+        )
+    )
+
+    if not (is_super_admin or is_admin_allowed or is_requester_allowed):
+        # Avoid revealing requests assigned to another administrator.
         if current_user.role == UserRole.ADMIN:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Session request not found",
             )
+
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to view this request",
         )
 
-    return request
+    return session_request
 
 
 @router.post(
@@ -176,18 +206,20 @@ def approve_request(
     """
     Approve a pending request.
 
-    ADMIN only.
+    Super admins can approve any request.
+    Regular admins can approve unassigned requests or requests
+    assigned to themselves.
 
     Approval creates the actual DrinkSession and calculates
     each participant's individual amount owed.
     """
 
-    request = get_session_request(
+    session_request = get_session_request(
         db,
         request_id=request_id,
     )
 
-    if request is None:
+    if session_request is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Session request not found",
@@ -195,7 +227,8 @@ def approve_request(
 
     if (
         current_user.role == UserRole.ADMIN
-        and request.handler_id != current_user.id
+        and session_request.handler_id is not None
+        and session_request.handler_id != current_user.id
     ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -205,16 +238,16 @@ def approve_request(
     try:
         approve_session_request(
             db,
-            request=request,
+            request=session_request,
             admin_user_id=current_user.id,
         )
 
-        # Persist the new DrinkSession, participants,
-        # updated request status, and calculated amounts.
+        # Persist the new DrinkSession, participants, updated request
+        # status, and calculated amounts.
         db.commit()
-        db.refresh(request)
+        db.refresh(session_request)
 
-        return request
+        return session_request
 
     except ValueError as exc:
         db.rollback()
@@ -223,8 +256,10 @@ def approve_request(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+
     except PermissionError as exc:
         db.rollback()
+
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Session request not found",
@@ -243,15 +278,17 @@ def reject_request(
     """
     Reject a pending request.
 
-    ADMIN only.
+    Super admins can reject any request.
+    Regular admins can reject unassigned requests or requests
+    assigned to themselves.
     """
 
-    request = get_session_request(
+    session_request = get_session_request(
         db,
         request_id=request_id,
     )
 
-    if request is None:
+    if session_request is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Session request not found",
@@ -259,7 +296,8 @@ def reject_request(
 
     if (
         current_user.role == UserRole.ADMIN
-        and request.handler_id != current_user.id
+        and session_request.handler_id is not None
+        and session_request.handler_id != current_user.id
     ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -269,7 +307,7 @@ def reject_request(
     try:
         result = reject_session_request(
             db,
-            request=request,
+            request=session_request,
             admin_user_id=current_user.id,
         )
 
@@ -286,8 +324,10 @@ def reject_request(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+
     except PermissionError as exc:
         db.rollback()
+
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Session request not found",

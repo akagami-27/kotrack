@@ -2,7 +2,8 @@
 Business logic for drink session requests.
 
 Normal users can submit and view their own requests.
-Admins can review only requests assigned to them; super admins can review all.
+Regular admins can review unassigned requests or requests assigned
+to themselves. Super admins can review all requests.
 
 Actual drink-session costs are calculated by
 create_drink_session() when an admin approves a request.
@@ -11,7 +12,7 @@ create_drink_session() when an admin approves a request.
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models.enums import UserRole
@@ -20,8 +21,8 @@ from app.models.session_request_participant import (
     SessionRequestParticipant,
 )
 from app.models.user import User
-from app.services.session_service import create_drink_session
 from app.services.session_handler_service import validate_session_handler
+from app.services.session_service import create_drink_session
 
 
 def create_session_request(
@@ -131,8 +132,14 @@ def get_session_requests(
     *,
     status_filter: str | None = None,
     handler_id: int | None = None,
+    include_unassigned: bool = False,
 ) -> list[SessionRequest]:
-    """Return session requests, optionally filtered by status."""
+    """
+    Return session requests, optionally filtered by status and handler.
+
+    When include_unassigned=True and handler_id is provided, return
+    requests that are unassigned or assigned to the specified handler.
+    """
 
     stmt = select(SessionRequest).order_by(
         SessionRequest.created_at.desc()
@@ -144,7 +151,17 @@ def get_session_requests(
         )
 
     if handler_id is not None:
-        stmt = stmt.where(SessionRequest.handler_id == handler_id)
+        if include_unassigned:
+            stmt = stmt.where(
+                or_(
+                    SessionRequest.handler_id.is_(None),
+                    SessionRequest.handler_id == handler_id,
+                )
+            )
+        else:
+            stmt = stmt.where(
+                SessionRequest.handler_id == handler_id
+            )
 
     return list(
         db.execute(stmt).scalars().all()
@@ -169,7 +186,7 @@ def approve_session_request(
     *,
     request: SessionRequest,
     admin_user_id: int,
-):
+) -> SessionRequest:
     """
     Approve a pending request and create the actual DrinkSession.
 
@@ -196,12 +213,22 @@ def approve_session_request(
             "Administrator is inactive"
         )
 
-    if admin.role == UserRole.ADMIN and request.handler_id != admin.id:
-        raise PermissionError(
-            "You can approve only requests assigned to you"
+    if admin.role not in {
+        UserRole.ADMIN,
+        UserRole.SUPER_ADMIN,
+    }:
+        raise ValueError(
+            "Only administrators can approve session requests"
         )
-    if admin.role not in {UserRole.ADMIN, UserRole.SUPER_ADMIN}:
-        raise ValueError("Only administrators can approve session requests")
+
+    if (
+        admin.role == UserRole.ADMIN
+        and request.handler_id is not None
+        and request.handler_id != admin.id
+    ):
+        raise PermissionError(
+            "You can approve only unassigned requests or requests assigned to you"
+        )
 
     participant_user_ids = [
         participant.user_id
@@ -215,11 +242,12 @@ def approve_session_request(
 
     try:
         handler_id = request.handler_id
+
         try:
             validate_session_handler(db, handler_id)
         except ValueError:
-            # Requests may outlive an administrator's eligibility. Keep
-            # approval usable and clear the stale assignment safely.
+            # Requests may outlive an administrator's eligibility.
+            # Clear a stale assignment so approval can proceed safely.
             handler_id = None
             request.handler_id = None
 
@@ -254,7 +282,7 @@ def reject_session_request(
     request: SessionRequest,
     admin_user_id: int,
 ) -> SessionRequest:
-    """Reject a pending session request."""
+    """Reject a pending request."""
 
     if request.status != "PENDING":
         raise ValueError(
@@ -273,12 +301,22 @@ def reject_session_request(
             "Administrator is inactive"
         )
 
-    if admin.role == UserRole.ADMIN and request.handler_id != admin.id:
-        raise PermissionError(
-            "You can reject only requests assigned to you"
+    if admin.role not in {
+        UserRole.ADMIN,
+        UserRole.SUPER_ADMIN,
+    }:
+        raise ValueError(
+            "Only administrators can reject session requests"
         )
-    if admin.role not in {UserRole.ADMIN, UserRole.SUPER_ADMIN}:
-        raise ValueError("Only administrators can reject session requests")
+
+    if (
+        admin.role == UserRole.ADMIN
+        and request.handler_id is not None
+        and request.handler_id != admin.id
+    ):
+        raise PermissionError(
+            "You can reject only unassigned requests or requests assigned to you"
+        )
 
     request.status = "REJECTED"
     request.reviewed_by = admin_user_id

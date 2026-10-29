@@ -271,7 +271,37 @@ def test_admin_summary_and_payment_endpoints_exclude_other_handler_users(db: Ses
     try:
         analytics = client.get("/api/admin/analytics")
         assert analytics.status_code == 200
-        assert {user["name"] for user in analytics.json()["users"]} == {"Member A"}
+
+        analytics_data = analytics.json()
+        summary = analytics_data["summary"]
+
+        # Summary must reflect Ahmad's assigned session only.
+        assert summary["total_users"] == 1
+        assert summary["total_sessions"] == 1
+        assert summary["total_packets"] == 1
+        assert Decimal(str(summary["total_session_value"])) == Decimal("25.00")
+        assert Decimal(str(summary["total_confirmed_payments"])) == Decimal("0")
+        assert Decimal(str(summary["total_outstanding"])) == Decimal("25.00")
+        assert summary["pending_payments"] == 1
+
+        # User balances must not expose Siti's participant.
+        users = analytics_data["users"]
+        assert {user["name"] for user in users} == {"Member A"}
+
+        member_a_balance = users[0]
+        assert Decimal(str(member_a_balance["total_owed"])) == Decimal("25.00")
+        assert Decimal(str(member_a_balance["total_paid"])) == Decimal("0")
+        assert Decimal(str(member_a_balance["balance"])) == Decimal("25.00")
+
+        # Both financial rankings must exclude Siti's participant.
+        debt_users = analytics_data["highest_debt_users"]
+        spenders = analytics_data["highest_spenders"]
+
+        assert [user["name"] for user in debt_users] == ["Member A"]
+        assert Decimal(str(debt_users[0]["balance"])) == Decimal("25.00")
+
+        assert [user["name"] for user in spenders] == ["Member A"]
+        assert Decimal(str(spenders[0]["total_spent"])) == Decimal("25.00")
 
         payments = client.get("/api/payments")
         assert payments.status_code == 200
@@ -364,5 +394,153 @@ def test_demoted_admin_creator_does_not_gain_regular_user_mutation_rights(db: Se
     client = as_user(db, root)
     try:
         assert client.get(f"/api/sessions/{session.id}").status_code == 200
+    finally:
+        client.close()
+
+def test_admin_can_access_unassigned_and_own_assigned_sessions(db: Session):
+    ahmad = add_user(db, "Ahmad", UserRole.ADMIN)
+    root = add_user(db, "Root", UserRole.SUPER_ADMIN)
+    member_a = add_user(db, "Member A", UserRole.USER)
+    member_b = add_user(db, "Member B", UserRole.USER)
+
+    unassigned = add_session(
+        db, creator=root, handler=None, participant=member_a
+    )
+    assigned_to_ahmad = add_session(
+        db, creator=root, handler=ahmad, participant=member_b
+    )
+    db.commit()
+
+    client = as_user(db, ahmad)
+    try:
+        response = client.get("/api/sessions")
+        assert response.status_code == 200
+        assert {row["id"] for row in response.json()} == {
+            unassigned.id,
+            assigned_to_ahmad.id,
+        }
+        assert client.get(f"/api/sessions/{unassigned.id}").status_code == 200
+        assert (
+            client.get(f"/api/sessions/{assigned_to_ahmad.id}").status_code
+            == 200
+        )
+    finally:
+        client.close()
+
+
+def test_admin_cannot_view_another_admins_request_even_if_requester(
+    db: Session,
+):
+    ahmad = add_user(db, "Ahmad", UserRole.ADMIN)
+    siti = add_user(db, "Siti", UserRole.ADMIN)
+
+    request = create_session_request(
+        db,
+        requested_by=ahmad.id,
+        session_date=date(2026, 10, 27),
+        packets_used=Decimal("1"),
+        participant_user_ids=[ahmad.id],
+        handler_id=siti.id,
+    )
+    db.commit()
+
+    client = as_user(db, ahmad)
+    try:
+        response = client.get(f"/api/session-requests/{request.id}")
+        assert response.status_code == 404
+    finally:
+        client.close()
+
+
+def test_admin_can_approve_and_reject_unassigned_requests(db: Session):
+    ahmad = add_user(db, "Ahmad", UserRole.ADMIN)
+    member_a = add_user(db, "Member A", UserRole.USER)
+    member_b = add_user(db, "Member B", UserRole.USER)
+
+    request_to_approve = create_session_request(
+        db,
+        requested_by=member_a.id,
+        session_date=date(2026, 10, 27),
+        packets_used=Decimal("1"),
+        participant_user_ids=[member_a.id],
+        handler_id=None,
+    )
+    request_to_reject = create_session_request(
+        db,
+        requested_by=member_b.id,
+        session_date=date(2026, 10, 28),
+        packets_used=Decimal("1"),
+        participant_user_ids=[member_b.id],
+        handler_id=None,
+    )
+    db.commit()
+
+    client = as_user(db, ahmad)
+    try:
+        approved = client.post(
+            f"/api/session-requests/{request_to_approve.id}/approve"
+        )
+        assert approved.status_code == 200
+
+        rejected = client.post(
+            f"/api/session-requests/{request_to_reject.id}/reject"
+        )
+        assert rejected.status_code == 200
+    finally:
+        client.close()
+
+
+def test_super_admin_can_view_all_sessions_and_requests(db: Session):
+    ahmad = add_user(db, "Ahmad", UserRole.ADMIN)
+    siti = add_user(db, "Siti", UserRole.ADMIN)
+    root = add_user(db, "Root", UserRole.SUPER_ADMIN)
+    member_a = add_user(db, "Member A", UserRole.USER)
+    member_b = add_user(db, "Member B", UserRole.USER)
+
+    assigned_session = add_session(
+        db, creator=root, handler=ahmad, participant=member_a
+    )
+    unassigned_session = add_session(
+        db, creator=root, handler=None, participant=member_b
+    )
+
+    request_a = create_session_request(
+        db,
+        requested_by=member_a.id,
+        session_date=date(2026, 10, 29),
+        packets_used=Decimal("1"),
+        participant_user_ids=[member_a.id],
+        handler_id=ahmad.id,
+    )
+    request_s = create_session_request(
+        db,
+        requested_by=member_b.id,
+        session_date=date(2026, 10, 30),
+        packets_used=Decimal("1"),
+        participant_user_ids=[member_b.id],
+        handler_id=siti.id,
+    )
+    db.commit()
+
+    client = as_user(db, root)
+    try:
+        sessions = client.get("/api/sessions")
+        assert sessions.status_code == 200
+        assert {row["id"] for row in sessions.json()} == {
+            assigned_session.id,
+            unassigned_session.id,
+        }
+
+        requests = client.get("/api/session-requests")
+        assert requests.status_code == 200
+        assert {row["id"] for row in requests.json()} == {
+            request_a.id,
+            request_s.id,
+        }
+
+        assert (
+            client.get(f"/api/session-requests/{request_s.id}").status_code
+            == 200
+        )
     finally:
         client.close()
