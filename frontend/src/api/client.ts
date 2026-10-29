@@ -1,21 +1,14 @@
-const API_URL =
-  import.meta.env.VITE_API_URL ??
-  (import.meta.env.DEV
-    ? 'http://localhost:8000'
-    : '')
+const API_URL = import.meta.env.VITE_API_URL ?? ''
 
-const TOKEN_KEY =
-  'kotrack_access_token'
+const TOKEN_KEY = 'kotrack_access_token'
 
 export async function apiRequest<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const token =
-    localStorage.getItem(TOKEN_KEY)
+  const token = localStorage.getItem(TOKEN_KEY)
 
-  const headers =
-    new Headers(options.headers)
+  const headers = new Headers(options.headers)
 
   /*
    * IMPORTANT:
@@ -28,37 +21,27 @@ export async function apiRequest<T>(
    *
    * when body is FormData.
    */
-  const isFormData =
-    options.body instanceof FormData
+  const isFormData = options.body instanceof FormData
 
   if (
     options.body &&
     !isFormData &&
     !headers.has('Content-Type')
   ) {
-    headers.set(
-      'Content-Type',
-      'application/json',
-    )
+    headers.set('Content-Type', 'application/json')
   }
 
   if (token) {
-    headers.set(
-      'Authorization',
-      `Bearer ${token}`,
-    )
+    headers.set('Authorization', `Bearer ${token}`)
   }
 
   let response: Response
 
   try {
-    response = await fetch(
-      `${API_URL}${path}`,
-      {
-        ...options,
-        headers,
-      },
-    )
+    response = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers,
+    })
   } catch {
     throw new Error(
       'Unable to connect to KoTrack server. Please make sure the backend is running.',
@@ -74,9 +57,7 @@ export async function apiRequest<T>(
   }
 
   const contentType =
-    response.headers.get(
-      'content-type',
-    ) || ''
+    response.headers.get('content-type') || ''
 
   const data: unknown = contentType.includes(
     'application/json',
@@ -85,24 +66,22 @@ export async function apiRequest<T>(
     : await response.text().catch(() => null)
 
   if (!response.ok) {
-    let message =
-      `Request failed with status ${response.status}`
+    let message = `Request failed with status ${response.status}`
 
     if (
       data &&
       typeof data === 'object' &&
       'detail' in data
     ) {
-      const detail =
-        (data as {
+      const detail = (
+        data as {
           detail?: unknown
-        }).detail
+        }
+      ).detail
 
       if (typeof detail === 'string') {
         message = detail
-      } else if (
-        Array.isArray(detail)
-      ) {
+      } else if (Array.isArray(detail)) {
         message = detail
           .map((item) => {
             if (
@@ -111,9 +90,7 @@ export async function apiRequest<T>(
               'msg' in item
             ) {
               return String(
-                (item as {
-                  msg: unknown
-                }).msg,
+                (item as { msg: unknown }).msg,
               )
             }
 
@@ -150,7 +127,9 @@ export async function apiBlobRequest(
   let response: Response
 
   try {
-    response = await fetch(`${API_URL}${path}`, { headers })
+    response = await fetch(`${API_URL}${path}`, {
+      headers,
+    })
   } catch {
     throw new Error(
       'Unable to reach KoTrack API. Check your connection and try again.',
@@ -159,6 +138,7 @@ export async function apiBlobRequest(
 
   if (response.status === 401) {
     localStorage.removeItem(TOKEN_KEY)
+
     throw new Error(
       'Your session has expired. Please sign in again.',
     )

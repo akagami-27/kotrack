@@ -1,6 +1,6 @@
 """Authorization helpers for session-scoped administrator access."""
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, or_, select
 
 from app.models.drink_session import DrinkSession
 from app.models.enums import UserRole
@@ -12,8 +12,13 @@ def visible_sessions_for(user: User):
     """Return a SQL predicate enforcing the caller's session visibility."""
     if user.role == UserRole.SUPER_ADMIN:
         return True
+
     if user.role == UserRole.ADMIN:
-        return DrinkSession.handler_id == user.id
+        return or_(
+            DrinkSession.handler_id.is_(None),
+            DrinkSession.handler_id == user.id,
+        )
+
     return exists(
         select(SessionParticipant.id).where(
             SessionParticipant.session_id == DrinkSession.id,
@@ -23,10 +28,14 @@ def visible_sessions_for(user: User):
 
 
 def admin_can_access_session(session: DrinkSession, user: User) -> bool:
-    """Check the session assignment rule for administrator mutations."""
+    """Check whether an administrator can access a session."""
     if user.role == UserRole.SUPER_ADMIN:
         return True
+
     return (
         user.role == UserRole.ADMIN
-        and session.handler_id == user.id
+        and (
+            session.handler_id is None
+            or session.handler_id == user.id
+        )
     )
