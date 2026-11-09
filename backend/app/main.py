@@ -5,6 +5,7 @@ from app.api.admin import router as admin_router
 from app.api.auth import router as auth_router
 from app.api.balance import router as balance_router
 from app.api.payments import router as payments_router
+from app.api.reconciliation import router as reconciliation_router
 from app.api.sessions import router as sessions_router
 from app.api.users import router as users_router
 from app.api.session_requests import router as session_requests_router
@@ -42,6 +43,7 @@ app.include_router(users_router)
 app.include_router(balance_router)
 app.include_router(sessions_router)
 app.include_router(payments_router)
+app.include_router(reconciliation_router)
 app.include_router(session_requests_router)
 app.include_router(admin_router)
 

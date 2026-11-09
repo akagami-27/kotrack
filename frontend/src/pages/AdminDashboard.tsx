@@ -72,13 +72,25 @@ type SessionFinancialBucket = {
   total_sessions: number
   total_packets: number | string
   total_session_value: number | string
+  total_collected?: number | string
+  total_outstanding?: number | string
+}
+
+type AdminFinancialBucket = SessionFinancialBucket & {
+  handler_id: number
+  handler_name: string
+  total_collected: number | string
+  total_outstanding: number | string
 }
 
 type FinancialBreakdown = {
   my_assigned_sessions: SessionFinancialBucket
-  other_admins_sessions: SessionFinancialBucket
-  unassigned_sessions: SessionFinancialBucket
-  system_wide: SessionFinancialBucket
+  other_admins_sessions?: SessionFinancialBucket
+  other_admins?: AdminFinancialBucket[]
+  unassigned_sessions?: SessionFinancialBucket
+  system_wide?: SessionFinancialBucket & {
+    total_collected: number | string
+  }
 }
 
 type AnalyticsResponse = {
@@ -458,89 +470,133 @@ export default function AdminDashboard() {
 
   const financialBreakdown = analytics?.financial_breakdown
 
-  const renderSessionFinancialBucket = (
-    label: string,
-    bucket: SessionFinancialBucket | undefined,
-  ) => (
-    <div className="rounded-xl border border-cyan-300/[0.10] bg-black/20 p-3">
-      <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-white/45">
-        {label}
-      </p>
+    const renderSessionFinancialBucket = (
+      label: string,
+      bucket: SessionFinancialBucket | undefined,
+    ) => {
+      const sessionValue = Number(bucket?.total_session_value ?? 0)
+      const collected = Number(bucket?.total_collected ?? 0)
+      const outstanding = Number(bucket?.total_outstanding ?? 0)
 
-      <div className="mt-3 grid grid-cols-3 gap-2">
-        <div>
-          <p className="text-[9px] text-white/35">Sessions</p>
-          <p className="mt-1 text-lg font-semibold">
-            {bucket?.total_sessions ?? 0}
-          </p>
-        </div>
+      const collectionRate =
+        sessionValue > 0
+          ? Math.min((collected / sessionValue) * 100, 100)
+          : 0
 
-        <div>
-          <p className="text-[9px] text-white/35">Packets</p>
-          <p className="mt-1 text-lg font-semibold">
-            {Number(bucket?.total_packets ?? 0).toFixed(2)}
-          </p>
-        </div>
+      const hasFinancialData =
+        bucket?.total_collected !== undefined &&
+        bucket?.total_outstanding !== undefined
 
-        <div>
-          <p className="text-[9px] text-white/35">Session Value</p>
-          <p className="mt-1 text-sm font-semibold text-cyan-200">
-            {formatRM(Number(bucket?.total_session_value ?? 0))}
+      return (
+        <div className="rounded-xl border border-cyan-300/[0.10] bg-black/20 p-3">
+          <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-white/45">
+            {label}
           </p>
+
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <div>
+              <p className="text-[9px] text-white/35">Sessions</p>
+              <p className="mt-1 text-lg font-semibold">
+                {bucket?.total_sessions ?? 0}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-[9px] text-white/35">Packets</p>
+              <p className="mt-1 text-lg font-semibold">
+                {Number(bucket?.total_packets ?? 0).toFixed(2)}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-[9px] text-white/35">Session Value</p>
+              <p className="mt-1 text-sm font-semibold text-cyan-200">
+                {formatRM(sessionValue)}
+              </p>
+            </div>
+          </div>
+
+          {hasFinancialData && (
+            <>
+              <div className="my-3 border-t border-white/[0.06]" />
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <p className="text-[9px] text-white/35">Collected</p>
+                  <p className="mt-1 text-sm font-semibold text-emerald-300">
+                    {formatRM(collected)}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-[9px] text-white/35">Outstanding</p>
+                  <p className="mt-1 text-sm font-semibold text-red-300">
+                    {formatRM(outstanding)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-[9px] text-white/35">
+                    Collection Ratio
+                  </p>
+                  <p className="font-mono text-[10px] text-cyan-200">
+                    {collectionRate.toFixed(1)}%
+                  </p>
+                </div>
+
+                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+                  <div
+                    className="h-full rounded-full bg-cyan-300"
+                    style={{ width: `${collectionRate}%` }}
+                  />
+                </div>
+              </div>
+            </>
+          )}
         </div>
-      </div>
-    </div>
-  )
+      )
+    }
+
+  const isSuperAdmin = isSuperAdminRole(user?.role)
+
+  // FIN-01 preserves the original dashboard's payment-based system-wide
+  // summary for Super Admin. Regular Admins remain scoped to their own
+  // assigned sessions and allocation-based collections.
+  const adminFinancialScope = financialBreakdown?.my_assigned_sessions
 
   const totalSessionValue = Math.max(
-    Number(analytics?.summary.total_session_value ?? 0),
+    Number(
+      isSuperAdmin
+        ? analytics?.summary.total_session_value
+        : adminFinancialScope?.total_session_value,
+    ) || 0,
     0,
   )
 
   const totalConfirmedPayments = Math.max(
-    Number(analytics?.summary.total_confirmed_payments ?? 0),
+    Number(
+      isSuperAdmin
+        ? analytics?.summary.total_confirmed_payments
+        : adminFinancialScope?.total_collected,
+    ) || 0,
     0,
   )
 
   const safeOutstanding = Math.max(
-    totalSessionValue - totalConfirmedPayments,
+    Number(
+      isSuperAdmin
+        ? analytics?.summary.total_outstanding
+        : adminFinancialScope?.total_outstanding,
+    ) || 0,
     0,
   )
 
   const collectionRate =
     totalSessionValue > 0
-      ? Math.min(
-          (totalConfirmedPayments / totalSessionValue) * 100,
-          100,
-        )
+      ? Math.min((totalConfirmedPayments / totalSessionValue) * 100, 100)
       : 0
-
-  if (!user || !isAdminRole(user.role)) {
-    return (
-      <main className="flex min-h-[100dvh] items-center justify-center bg-[#05070d] px-6 pb-[env(safe-area-inset-bottom)] pt-[max(1.5rem,env(safe-area-inset-top))] text-white">
-        <div className="text-center">
-          <p className="mb-3 font-mono text-[9px] uppercase tracking-[0.3em] text-cyan-300/50">
-            Access / denied
-          </p>
-
-          <h1 className="text-2xl font-semibold">
-            Access denied
-          </h1>
-
-          <p className="mt-2 text-sm text-white/40">
-            Administrator access is required.
-          </p>
-
-          <Link
-            to="/dashboard"
-            className="mt-6 inline-block rounded-xl bg-white px-5 py-3 text-sm font-semibold text-black"
-          >
-            Return to dashboard
-          </Link>
-        </div>
-      </main>
-    )
-  }
 
   return (
     <main
@@ -607,7 +663,7 @@ export default function AdminDashboard() {
 
             <div className="hidden text-right md:block">
               <p className="text-xs text-white/60">
-                {user.name}
+                {user?.name ?? 'Admin'}
               </p>
 
               <p className="font-mono text-[8px] uppercase tracking-wider text-white/20">
@@ -615,7 +671,7 @@ export default function AdminDashboard() {
               </p>
             </div>
 
-            {isSuperAdminRole(user.role) && (
+            {isSuperAdminRole(user?.role) && (
               <Link
                 to="/admin/users"
                 className="min-h-10 rounded-xl border border-cyan-300/[0.10] bg-cyan-300/[0.035] px-2 py-2 text-[9px] text-cyan-100/70 transition hover:bg-cyan-300/[0.08] sm:px-4 sm:py-2.5 sm:text-xs"
@@ -781,7 +837,9 @@ export default function AdminDashboard() {
               subtitle={isSuperAdminRole(user?.role) ? 'SYSTEM-WIDE FINANCIAL STATE' : 'ASSIGNED PARTICIPANT FINANCIAL STATE'}
             />
 
-            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div
+              className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3"
+            >
               <Metric
                 label="SESSION VALUE"
                 value={formatRM(totalSessionValue)}
@@ -794,7 +852,7 @@ export default function AdminDashboard() {
               />
 
               <Metric
-                label="OUTSTANDING"
+                label={isSuperAdmin ? 'SYSTEM-WIDE OUTSTANDING' : 'OUTSTANDING'}
                 value={formatRM(safeOutstanding)}
                 danger
               />
@@ -870,79 +928,114 @@ export default function AdminDashboard() {
           </section>
         </section>
 
-            {isSuperAdminRole(user?.role) && (
-        <section className="cyber-panel mt-5 rounded-2xl border border-cyan-300/[0.08] bg-black/20 p-4 sm:p-5">
-          <PanelHeader
-            code="FIN-02"
-            title="Session Financial Breakdown"
-            subtitle="SEPARATED BY SESSION HANDLER"
-          />
+            {(isSuperAdminRole(user?.role) || user?.role === 'ADMIN') && (
+  <section className="cyber-panel mt-5 rounded-2xl border border-cyan-300/[0.08] bg-black/20 p-4 sm:p-5">
+    <PanelHeader
+      code="FIN-02"
+      title="Session Financial Breakdown"
+      subtitle={
+        isSuperAdminRole(user?.role)
+          ? 'SEPARATED BY SESSION HANDLER'
+          : 'YOUR ASSIGNED SESSION FINANCES'
+      }
+    />
 
-          <p className="mt-2 text-xs leading-5 text-white/45">
-            Session values are grouped by assignment. The system-wide overview
-            includes assigned and unassigned sessions. Payment records are not
-            allocated to individual handlers, so these figures are not
-            handler-specific outstanding balances.
-          </p>
+    <p className="mt-2 text-xs leading-5 text-white/45">
+      Financial collections are based on confirmed payment allocations.
+      Unallocated payments are excluded until they are reconciled.
+    </p>
 
-          {analyticsLoading ? (
-            <LoadingBox text="Loading session financial breakdown..." />
-          ) : !financialBreakdown ? (
-            <EmptyBox
-              title="Financial breakdown unavailable."
-              description="Check the admin analytics API response."
-            />
-          ) : (
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              {renderSessionFinancialBucket(
-                'My Assigned Sessions',
-                financialBreakdown.my_assigned_sessions,
-              )}
+    {analyticsLoading ? (
+      <LoadingBox text="Loading session financial breakdown..." />
+    ) : !financialBreakdown ? (
+      <EmptyBox
+        title="Financial breakdown unavailable."
+        description="Check the admin analytics API response."
+      />
+    ) : (
+      <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-2">
+        <div className="xl:col-span-2">
+          {renderSessionFinancialBucket(
+            'My Assigned Sessions',
+            financialBreakdown.my_assigned_sessions,
+          )}
+        </div>
 
-              {renderSessionFinancialBucket(
-                "Other Admins' Sessions",
-                financialBreakdown.other_admins_sessions,
-              )}
-
-              {renderSessionFinancialBucket(
-                'Unassigned Sessions',
-                financialBreakdown.unassigned_sessions,
-              )}
-
-              <div className="rounded-xl border border-cyan-300/20 bg-cyan-300/[0.04] p-3">
-                <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-cyan-200/70">
-                  System-Wide Overview
-                </p>
-
-                <div className="mt-3 grid grid-cols-3 gap-2">
-                  <div>
-                    <p className="text-[9px] text-white/35">Sessions</p>
-                    <p className="mt-1 text-lg font-semibold">
-                      {financialBreakdown.system_wide.total_sessions}
+        {isSuperAdminRole(user?.role) && (
+                <>
+                  <div className="xl:col-span-2">
+                    <p className="mb-3 font-mono text-[9px] uppercase tracking-[0.16em] text-white/45">
+                      Individual Admin Breakdown
                     </p>
+
+                    {!financialBreakdown.other_admins?.length ? (
+                      <EmptyBox
+                        title="No regular Admin accounts found."
+                        description="Individual Admin financial figures will appear here."
+                      />
+                    ) : (
+                      <div
+                        className={`grid gap-3 ${
+                          financialBreakdown.other_admins.length === 1
+                            ? 'grid-cols-1'
+                            : 'grid-cols-1 md:grid-cols-2'
+                        }`}
+                      >
+                        {financialBreakdown.other_admins.map((admin) => (
+                          <div key={admin.handler_id}>
+                            {renderSessionFinancialBucket(
+                              admin.handler_name,
+                              admin,
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div>
-                    <p className="text-[9px] text-white/35">Packets</p>
-                    <p className="mt-1 text-lg font-semibold">
-                      {Number(
-                        financialBreakdown.system_wide.total_packets,
-                      ).toFixed(2)}
-                    </p>
+                    {renderSessionFinancialBucket(
+                      'Unassigned Sessions',
+                      financialBreakdown.unassigned_sessions,
+                    )}
                   </div>
 
-                  <div>
-                    <p className="text-[9px] text-white/35">Session Value</p>
-                    <p className="mt-1 text-sm font-semibold text-cyan-200">
-                      {formatRM(
-                        Number(
-                          financialBreakdown.system_wide.total_session_value,
-                        ),
-                      )}
+                  <div className="rounded-xl border border-cyan-300/20 bg-cyan-300/[0.04] p-3">
+                    <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-cyan-200/70">
+                      System-Wide Overview
                     </p>
+
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      <div>
+                        <p className="text-[9px] text-white/35">Sessions</p>
+                        <p className="mt-1 text-lg font-semibold">
+                          {financialBreakdown.system_wide?.total_sessions ?? 0}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-[9px] text-white/35">Packets</p>
+                        <p className="mt-1 text-lg font-semibold">
+                          {Number(
+                            financialBreakdown.system_wide?.total_packets ?? 0,
+                          ).toFixed(2)}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-[9px] text-white/35">Session Value</p>
+                        <p className="mt-1 text-sm font-semibold text-cyan-200">
+                          {formatRM(
+                            Number(
+                              financialBreakdown.system_wide?.total_session_value ?? 0,
+                            ),
+                          )}
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
+                </>
+              )}
             </div>
           )}
         </section>
@@ -1277,7 +1370,7 @@ export default function AdminDashboard() {
               <div className="mt-4 space-y-2">
                 {visibleUsers.map((account) => {
                   const isCurrentAdmin =
-                    account.id === user.id
+                    account.id === user?.id
                   const processing =
                     processingUserId === account.id
 

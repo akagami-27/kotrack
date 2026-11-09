@@ -242,6 +242,7 @@ def test_admin_summary_and_payment_endpoints_exclude_other_handler_users(db: Ses
     add_session(db, creator=root, handler=siti, participant=member_s)
     payment_a = Payment(
         user_id=member_a.id,
+        handler_id=ahmad.id,
         amount=Decimal("5.00"),
         status=PaymentStatus.PENDING,
         receipt_data=b"own receipt",

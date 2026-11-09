@@ -1,3 +1,4 @@
+
 """
 Admin dashboard business logic.
 
@@ -6,12 +7,9 @@ Provides aggregated statistics for the administrator dashboard.
 All financial values are calculated from the source records:
     SessionParticipant.amount_owed
     Payment.amount where status == CONFIRMED
+    PaymentAllocation.amount where payment status == CONFIRMED
 
 No balance is stored directly on the User model.
-
-Payment records are not allocated to individual sessions or handlers.
-Consequently, handler-specific collected payments and outstanding balances
-cannot be calculated reliably from the current schema.
 """
 
 from decimal import Decimal
@@ -22,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.models.drink_session import DrinkSession
 from app.models.enums import PaymentStatus, UserRole
 from app.models.payment import Payment
+from app.models.payment_allocation import PaymentAllocation
 from app.models.session_participant import SessionParticipant
 from app.models.session_request import SessionRequest
 from app.models.user import User
@@ -211,17 +210,15 @@ def get_session_financial_breakdown(
     super_admin_id: int,
 ) -> dict:
     """
-    Return non-overlapping session statistics for the Super Admin dashboard.
+    Return session and allocation-based financial statistics.
 
-    Categories:
-        - Sessions assigned to the current Super Admin.
-        - Sessions assigned to regular admins.
-        - Unassigned sessions.
-        - All sessions system-wide.
+    Financial attribution is based on the session handler.
 
-    Financial figures represent session values, not reconciled outstanding
-    balances. Payments cannot be attributed to individual sessions or
-    handlers because the current Payment model has no such allocation.
+    Only confirmed payment allocations count as collected.
+    Unallocated payment amounts are deliberately excluded.
+
+    Outstanding is calculated from participant debts minus confirmed
+    allocations belonging to participants in the relevant sessions.
     """
 
     def aggregate_sessions(*conditions) -> dict:
@@ -241,40 +238,123 @@ def get_session_financial_breakdown(
             ).where(*conditions)
         ).one()
 
+        total_owed = db.scalar(
+            select(
+                func.coalesce(
+                    func.sum(SessionParticipant.amount_owed),
+                    ZERO,
+                )
+            )
+            .select_from(SessionParticipant)
+            .join(
+                DrinkSession,
+                DrinkSession.id == SessionParticipant.session_id,
+            )
+            .where(*conditions)
+        ) or ZERO
+
+        total_collected = db.scalar(
+            select(
+                func.coalesce(
+                    func.sum(PaymentAllocation.amount),
+                    ZERO,
+                )
+            )
+            .select_from(PaymentAllocation)
+            .join(
+                Payment,
+                Payment.id == PaymentAllocation.payment_id,
+            )
+            .join(
+                SessionParticipant,
+                SessionParticipant.id
+                == PaymentAllocation.session_participant_id,
+            )
+            .join(
+                DrinkSession,
+                DrinkSession.id == SessionParticipant.session_id,
+            )
+            .where(
+                Payment.status == PaymentStatus.CONFIRMED,
+                *conditions,
+            )
+        ) or ZERO
+
+        total_owed = Decimal(total_owed)
+        total_collected = Decimal(total_collected)
+
         return {
             "total_sessions": int(row.total_sessions),
             "total_packets": Decimal(row.total_packets),
             "total_session_value": Decimal(
                 row.total_session_value
             ),
+            "total_collected": total_collected,
+            "total_outstanding": max(
+                total_owed - total_collected,
+                ZERO,
+            ),
         }
 
-    # Sessions assigned directly to the authenticated Super Admin.
+    # Super Admin's own assigned sessions.
     my_sessions = aggregate_sessions(
         DrinkSession.handler_id == super_admin_id,
     )
 
-    # Sessions assigned to regular admins only.
-    # Super Admin-assigned and unassigned sessions are excluded.
-    regular_admin_ids = select(User.id).where(
-        User.role == UserRole.ADMIN,
-    )
+    # Retrieve all regular Admin accounts.
+    regular_admins = db.execute(
+        select(
+            User.id,
+            User.name,
+        )
+        .where(User.role == UserRole.ADMIN)
+        .order_by(User.name.asc())
+    ).all()
 
+    # Individual financial breakdown for each regular Admin.
+    other_admins = [
+        {
+            "handler_id": admin.id,
+            "handler_name": admin.name,
+            **aggregate_sessions(
+                DrinkSession.handler_id == admin.id,
+            ),
+        }
+        for admin in regular_admins
+    ]
+
+    # Preserve the existing combined session statistics for compatibility.
+    # Do not expose combined financial attribution.
     other_admin_sessions = aggregate_sessions(
-        DrinkSession.handler_id.in_(regular_admin_ids),
+        DrinkSession.handler_id.in_(
+            select(User.id).where(
+                User.role == UserRole.ADMIN,
+            )
+        ),
     )
 
-    # Sessions that do not currently have a handler.
+    other_admin_sessions.pop("total_collected")
+    other_admin_sessions.pop("total_outstanding")
+
+    # Unassigned sessions have no handler-specific financial attribution.
     unassigned_sessions = aggregate_sessions(
         DrinkSession.handler_id.is_(None),
     )
 
-    # All sessions, including assigned and unassigned sessions.
+    unassigned_sessions.pop("total_collected")
+    unassigned_sessions.pop("total_outstanding")
+
+    # System-wide session statistics only.
+    # Deliberately does not expose combined collected or outstanding.
     system_wide = aggregate_sessions()
+
+    system_wide.pop("total_collected")
+    system_wide.pop("total_outstanding")
 
     return {
         "my_assigned_sessions": my_sessions,
         "other_admins_sessions": other_admin_sessions,
+        "other_admins": other_admins,
         "unassigned_sessions": unassigned_sessions,
         "system_wide": system_wide,
     }
@@ -508,6 +588,20 @@ def get_admin_analytics(
     }
 
     if (
+        current_user is not None
+        and current_user.role == UserRole.ADMIN
+    ):
+        breakdown = get_session_financial_breakdown(
+            db,
+            super_admin_id=current_user.id,
+        )
+
+        # Regular Admins receive only their own assigned-session figures.
+        response["financial_breakdown"] = {
+            "my_assigned_sessions": breakdown["my_assigned_sessions"],
+        }
+
+    elif (
         current_user is not None
         and current_user.role == UserRole.SUPER_ADMIN
     ):

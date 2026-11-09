@@ -38,7 +38,14 @@ def payments_visible_to(user: User):
             ),
         )
     )
-    return owns_participant & ~has_other_handler
+    return or_(
+        Payment.handler_id == user.id,
+        (
+            Payment.handler_id.is_(None)
+            & owns_participant
+            & ~has_other_handler
+        ),
+    )
 
 
 def handled_payment_user_ids(handler_id: int):

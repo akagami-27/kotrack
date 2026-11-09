@@ -14,7 +14,8 @@ from app.models.payment import Payment
 from app.models.session_request import SessionRequest
 from app.models.session_request_participant import SessionRequestParticipant
 from app.models.password_reset import PasswordResetRequest
-
+from app.models.payment_reconciliation import PaymentReconciliation
+from app.models.payment_allocation import PaymentAllocation
 
 __all__ = [
     "Base",
@@ -27,4 +28,6 @@ __all__ = [
     "Payment",
     "SessionRequest",
     "SessionRequestParticipant",
+    "PaymentReconciliation",
+    "PaymentAllocation",
 ]

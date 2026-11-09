@@ -63,6 +63,10 @@ class SessionParticipant(Base):
         foreign_keys=[user_id],
     )
 
+    payment_allocations: Mapped[list["PaymentAllocation"]] = relationship(
+        back_populates="session_participant",
+    )
+
     @property
     def user_name(self) -> str:
         """Return the participant's current user name."""

@@ -1,3 +1,4 @@
+
 """
 Business logic for drink sessions.
 
@@ -10,6 +11,7 @@ This module is responsible for:
 - Enforcing the 3-day user modification rule
 - Recalculating total_cost
 - Recalculating participant amount_owed
+- Protecting existing payment allocations
 
 Financial values are NEVER trusted from client input.
 """
@@ -17,7 +19,7 @@ Financial values are NEVER trusted from client input.
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
 from app.models.drink_session import (
@@ -25,6 +27,7 @@ from app.models.drink_session import (
     DrinkSession,
 )
 from app.models.enums import UserRole
+from app.models.payment_allocation import PaymentAllocation
 from app.models.session_participant import SessionParticipant
 from app.models.user import User
 from app.services.financial import (
@@ -47,26 +50,16 @@ def _validate_participants(
     db: DbSession,
     participant_user_ids: list[int],
 ) -> dict[int, User]:
-    """
-    Validate all participant users and return them indexed by ID.
-    """
+    """Validate all participant users and return them indexed by ID."""
 
     if not participant_user_ids:
-        raise ValueError(
-            "A session must have at least one participant"
-        )
+        raise ValueError("A session must have at least one participant")
 
-    if len(set(participant_user_ids)) != len(
-        participant_user_ids
-    ):
-        raise ValueError(
-            "Duplicate user_id in participant list"
-        )
+    if len(set(participant_user_ids)) != len(participant_user_ids):
+        raise ValueError("Duplicate user_id in participant list")
 
     users = db.execute(
-        select(User).where(
-            User.id.in_(participant_user_ids)
-        )
+        select(User).where(User.id.in_(participant_user_ids))
     ).scalars().all()
 
     users_by_id = {
@@ -99,6 +92,29 @@ def _validate_participants(
     return users_by_id
 
 
+def _get_allocated_amount(
+    db: DbSession,
+    participant_id: int,
+) -> Decimal:
+    """
+    Return the total confirmed payment allocation amount
+    associated with a session participant.
+    """
+
+    allocated_amount = db.scalar(
+        select(
+            func.coalesce(
+                func.sum(PaymentAllocation.amount),
+                0,
+            )
+        ).where(
+            PaymentAllocation.session_participant_id == participant_id
+        )
+    )
+
+    return Decimal(str(allocated_amount or 0))
+
+
 def _can_modify_session(
     *,
     session: DrinkSession,
@@ -127,17 +143,74 @@ def _can_modify_session(
     ):
         return False
 
-    # Normal users can only modify sessions they created.
     if session.created_by != current_user.id:
         return False
 
     today = datetime.now(timezone.utc).date()
-
-    age_in_days = (
-        today - session.session_date
-    ).days
+    age_in_days = (today - session.session_date).days
 
     return age_in_days <= USER_SESSION_EDIT_DAYS
+
+
+def _validate_payment_allocations_for_update(
+    db: DbSession,
+    *,
+    existing_participants: dict[int, SessionParticipant],
+    new_split: dict[int, Decimal],
+) -> None:
+    """
+    Prevent session updates from invalidating existing allocations.
+
+    A participant cannot be removed if they have allocated payments.
+
+    A participant's amount_owed cannot be reduced below
+    their existing allocated payment total.
+    """
+
+    selected_user_ids = set(new_split.keys())
+
+    for user_id, participant in existing_participants.items():
+        allocated_amount = _get_allocated_amount(
+            db,
+            participant.id,
+        )
+
+        if user_id not in selected_user_ids and allocated_amount > 0:
+            raise ValueError(
+                f"Cannot remove user {user_id} because their session debt "
+                "has existing payment allocations"
+            )
+
+        if user_id in selected_user_ids:
+            new_amount_owed = Decimal(str(new_split[user_id]))
+
+            if new_amount_owed < allocated_amount:
+                raise ValueError(
+                    f"Cannot reduce user {user_id}'s session debt below "
+                    f"their allocated payment amount of {allocated_amount}"
+                )
+
+
+def _validate_payment_allocations_for_delete(
+    db: DbSession,
+    *,
+    participants: list[SessionParticipant],
+) -> None:
+    """
+    Prevent deleting a session containing allocated payments.
+    """
+
+    for participant in participants:
+        allocated_amount = _get_allocated_amount(
+            db,
+            participant.id,
+        )
+
+        if allocated_amount > 0:
+            raise ValueError(
+                "Cannot delete this session because one or more "
+                "participants have existing payment allocations"
+            )
 
 
 # ============================================================================
@@ -156,49 +229,37 @@ def create_drink_session(
     price_per_packet: Decimal = DEFAULT_PRICE_PER_PACKET,
     commit: bool = True,
 ) -> DrinkSession:
-    """
-    Create a drink session and calculate all financial values server-side.
-    """
+    """Create a drink session and calculate all financial values server-side."""
 
     if not participant_user_ids:
-        raise ValueError(
-            "A session must have at least one participant"
-        )
+        raise ValueError("A session must have at least one participant")
 
-    if len(set(participant_user_ids)) != len(
-        participant_user_ids
-    ):
-        raise ValueError(
-            "Duplicate user_id in participant list"
-        )
+    if len(set(participant_user_ids)) != len(participant_user_ids):
+        raise ValueError("Duplicate user_id in participant list")
 
     if packets_used <= 0:
-        raise ValueError(
-            "Packets used must be greater than zero"
-        )
+        raise ValueError("Packets used must be greater than zero")
 
     if price_per_packet <= 0:
-        raise ValueError(
-            "Price per packet must be greater than zero"
-        )
+        raise ValueError("Price per packet must be greater than zero")
 
     creator = db.get(User, created_by)
 
     if creator is None:
-        raise ValueError(
-            "Session creator does not exist"
-        )
+        raise ValueError("Session creator does not exist")
 
     if not creator.is_active:
-        raise ValueError(
-            "Session creator is inactive"
-        )
+        raise ValueError("Session creator is inactive")
 
-    _validate_participants(
-        db,
-        participant_user_ids,
+    _validate_participants(db, participant_user_ids)
+
+    # Preserve unassigned sessions.
+    # Validate only explicitly selected handlers.
+    handler = (
+        validate_session_handler(db, handler_id)
+        if handler_id is not None
+        else None
     )
-    validate_session_handler(db, handler_id)
 
     total_cost = calculate_session_total(
         packets_used,
@@ -217,7 +278,7 @@ def create_drink_session(
         total_cost=total_cost,
         created_by=created_by,
         creator_role_at_creation=creator.role.value,
-        handler_id=handler_id,
+        handler_id=handler.id if handler is not None else None,
     )
 
     drink_session.participants = [
@@ -260,13 +321,18 @@ def update_drink_session(
     Update an existing drink session.
 
     ADMIN:
-        Can edit any session at any time.
+        Can edit sessions permitted by the session access rules.
+
+    SUPER_ADMIN:
+        Can modify any session.
 
     USER:
         Can edit only sessions they created,
         and only within 3 days of the session date.
 
     total_cost and participant amounts are always recalculated.
+
+    Existing payment allocations are protected from invalid changes.
     """
 
     if not _can_modify_session(
@@ -277,7 +343,6 @@ def update_drink_session(
             "You do not have permission to edit this session"
         )
 
-    # Keep existing values when fields are omitted.
     new_session_date = (
         session_date
         if session_date is not None
@@ -297,14 +362,10 @@ def update_drink_session(
     )
 
     if new_packets_used <= 0:
-        raise ValueError(
-            "Packets used must be greater than zero"
-        )
+        raise ValueError("Packets used must be greater than zero")
 
     if new_price_per_packet <= 0:
-        raise ValueError(
-            "Price per packet must be greater than zero"
-        )
+        raise ValueError("Price per packet must be greater than zero")
 
     if participant_user_ids is None:
         participant_user_ids = [
@@ -312,15 +373,14 @@ def update_drink_session(
             for participant in drink_session.participants
         ]
 
-    _validate_participants(
-        db,
-        participant_user_ids,
-    )
+    _validate_participants(db, participant_user_ids)
+
+    resolved_handler = None
 
     if update_handler:
-        validate_session_handler(db, handler_id)
+        # If handler_id is None, default to the active Super Admin.
+        resolved_handler = validate_session_handler(db, handler_id)
 
-    # Recalculate all financial values server-side.
     total_cost = calculate_session_total(
         new_packets_used,
         new_price_per_packet,
@@ -331,44 +391,36 @@ def update_drink_session(
         participant_user_ids,
     )
 
-    # Update session fields.
-    drink_session.session_date = new_session_date
-    drink_session.packets_used = new_packets_used
-    drink_session.price_per_packet = new_price_per_packet
-    drink_session.total_cost = total_cost
-    if update_handler:
-        drink_session.handler_id = handler_id
-
-    # IMPORTANT:
-    # Do NOT replace drink_session.participants with a new list.
-    #
-    # The database has a unique constraint on:
-    #     (session_id, user_id)
-    #
-    # Replacing the relationship can make SQLAlchemy INSERT the new
-    # participant before deleting the old one, causing a duplicate-key
-    # error when an existing participant stays in the session.
-    #
-    # Instead:
-    #   1. Update existing participants.
-    #   2. Delete participants removed from the session.
-    #   3. Insert only genuinely new participants.
-
+    # Preserve existing participant rows where possible.
     existing_participants = {
         participant.user_id: participant
         for participant in drink_session.participants
     }
 
+    # Validate payment allocations BEFORE changing session data.
+    _validate_payment_allocations_for_update(
+        db,
+        existing_participants=existing_participants,
+        new_split=split,
+    )
+
+    # Apply session updates only after allocation validation succeeds.
+    drink_session.session_date = new_session_date
+    drink_session.packets_used = new_packets_used
+    drink_session.price_per_packet = new_price_per_packet
+    drink_session.total_cost = total_cost
+
+    if update_handler:
+        drink_session.handler_id = resolved_handler.id
+
     selected_user_ids = set(split.keys())
 
-    # Update existing participants or mark removed participants for deletion.
     for user_id, participant in existing_participants.items():
         if user_id not in selected_user_ids:
             db.delete(participant)
         else:
             participant.amount_owed = split[user_id]
 
-    # Add only participants that did not already exist.
     for user_id, amount in split.items():
         if user_id not in existing_participants:
             drink_session.participants.append(
@@ -394,16 +446,7 @@ def delete_drink_session(
     drink_session: DrinkSession,
     current_user: User,
 ) -> None:
-    """
-    Delete an existing drink session.
-
-    ADMIN:
-        Can delete any session at any time.
-
-    USER:
-        Can delete only sessions they created,
-        and only within 3 days of the session date.
-    """
+    """Delete an existing drink session."""
 
     if not _can_modify_session(
         session=drink_session,
@@ -412,6 +455,12 @@ def delete_drink_session(
         raise PermissionError(
             "You do not have permission to delete this session"
         )
+
+    # Prevent deletion if any participant has allocated payments.
+    _validate_payment_allocations_for_delete(
+        db,
+        participants=list(drink_session.participants),
+    )
 
     db.delete(drink_session)
     db.flush()

@@ -71,6 +71,7 @@ RECEIPT_READ_CHUNK_SIZE = 1024 * 1024  # 1 MB
 )
 async def submit_payment(
     amount: str = Form(...),
+    handler_id: int = Form(...),
     receipt: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -184,6 +185,7 @@ async def submit_payment(
             db,
             user_id=current_user.id,
             amount=payment_amount,
+            handler_id=handler_id,
         )
 
         # --------------------------------------------------------------------
@@ -420,6 +422,9 @@ def confirm_payment_endpoint(
             admin_user_id=admin.id,
         )
 
+        db.commit()
+        db.refresh(payment)
+
         return payment
 
     except PermissionError as exc:
@@ -476,6 +481,9 @@ def reject_payment_endpoint(
             payment_id=payment_id,
             admin_user_id=admin.id,
         )
+
+        db.commit()
+        db.refresh(payment)
 
         return payment
 
