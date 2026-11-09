@@ -1,3 +1,4 @@
+
 """
 Business logic for drink session requests.
 
@@ -69,7 +70,10 @@ def create_session_request(
             "Requesting user is inactive"
         )
 
-    validate_session_handler(db, handler_id)
+    # Validate only explicitly selected handlers.
+    # Unassigned requests remain unassigned.
+    if handler_id is not None:
+        validate_session_handler(db, handler_id)
 
     stmt = select(User).where(
         User.id.in_(participant_user_ids)
@@ -243,13 +247,14 @@ def approve_session_request(
     try:
         handler_id = request.handler_id
 
-        try:
-            validate_session_handler(db, handler_id)
-        except ValueError:
-            # Requests may outlive an administrator's eligibility.
-            # Clear a stale assignment so approval can proceed safely.
-            handler_id = None
-            request.handler_id = None
+        if handler_id is not None:
+            try:
+                validate_session_handler(db, handler_id)
+            except ValueError:
+                # Requests may outlive an administrator's eligibility.
+                # Clear a stale assignment so approval can proceed safely.
+                handler_id = None
+                request.handler_id = None
 
         drink_session = create_drink_session(
             db,

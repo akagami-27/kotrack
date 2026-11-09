@@ -19,6 +19,11 @@ type Balance = {
   balance: string | number
 }
 
+type SessionHandler = {
+  id: number
+  name: string
+}
+
 type PaymentStatus =
   | 'PENDING'
   | 'CONFIRMED'
@@ -56,6 +61,12 @@ export default function Payments() {
   const [payments, setPayments] =
     useState<Payment[]>([])
 
+  const [sessionHandlers, setSessionHandlers] =
+    useState<SessionHandler[]>([])
+
+  const [handlerId, setHandlerId] =
+    useState('')
+
   const [amount, setAmount] =
     useState('')
 
@@ -88,19 +99,22 @@ export default function Payments() {
       try {
         if (isCurrent()) setError('')
 
-        const [balanceData, paymentData] =
-          await Promise.all([
-          apiRequest<Balance>(
-            '/api/balance/me',
+        const [
+          balanceData,
+          paymentData,
+          handlerData,
+        ] = await Promise.all([
+          apiRequest<Balance>('/api/balance/me'),
+          apiRequest<Payment[]>('/api/payments/me'),
+          apiRequest<SessionHandler[]>(
+            '/api/users/session-handlers',
           ),
-          apiRequest<Payment[]>(
-            '/api/payments/me',
-          ),
-          ])
+        ])
 
         if (isCurrent()) {
           setBalance(balanceData)
           setPayments(paymentData)
+          setSessionHandlers(handlerData)
         }
       } catch (err) {
         if (isCurrent()) {
@@ -197,6 +211,11 @@ export default function Payments() {
 
     const paymentAmount = Number(amount)
 
+    if (!handlerId) {
+      setError('Please select an Admin responsible for this payment.')
+      return
+    }
+
     if (
       !Number.isFinite(paymentAmount) ||
       paymentAmount <= 0
@@ -225,6 +244,11 @@ export default function Payments() {
       )
 
       formData.append(
+        'handler_id',
+        handlerId,
+      )
+
+      formData.append(
         'receipt',
         receipt.file,
       )
@@ -238,6 +262,7 @@ export default function Payments() {
       )
 
       setAmount('')
+      setHandlerId('')
       setReceipt(null)
       form.reset()
 
@@ -486,6 +511,40 @@ export default function Payments() {
                 className="mt-4"
               >
                 <div className="grid gap-3 sm:grid-cols-2">
+                  {/* ADMIN */}
+
+                  <div className="sm:col-span-2">
+                    <label
+                      htmlFor="payment-handler"
+                      className="mb-1.5 block text-[10px] font-medium text-white/45 sm:text-[11px]"
+                    >
+                      Admin
+                    </label>
+
+                    <select
+                      id="payment-handler"
+                      value={handlerId}
+                      onChange={(event) =>
+                        setHandlerId(event.target.value)
+                      }
+                      disabled={
+                        submitting ||
+                        sessionHandlers.length === 0
+                      }
+                      className="min-h-10 w-full rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2 text-xs text-white outline-none transition focus:border-white/20 disabled:opacity-50 sm:text-sm [&>option]:bg-[#0b0d15] [&>option]:text-white"
+                    >
+                      <option value="">Select an Admin</option>
+                      {sessionHandlers.map((handler) => (
+                        <option
+                          key={handler.id}
+                          value={handler.id}
+                        >
+                          {handler.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
                   {/* AMOUNT */}
 
                   <label className="block">
@@ -636,7 +695,8 @@ export default function Payments() {
                   disabled={
                     submitting ||
                     !amount ||
-                    !receipt
+                    !receipt ||
+                    !handlerId
                   }
                   className="mt-3 min-h-10 w-full rounded-xl bg-white px-4 py-2.5 text-xs font-semibold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto sm:px-5 sm:text-sm"
                 >

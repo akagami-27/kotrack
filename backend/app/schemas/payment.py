@@ -22,6 +22,7 @@ class PaymentRead(BaseModel):
 
     id: int
     user_id: int
+    handler_id: int | None
     amount: Decimal
     status: PaymentStatus
 

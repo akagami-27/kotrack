@@ -1,3 +1,4 @@
+
 from datetime import datetime
 from decimal import Decimal
 
@@ -36,6 +37,14 @@ class Payment(Base):
         index=True,
     )
 
+    # Admin selected by the user as the payment recipient.
+    # Nullable to preserve existing historical payments.
+    handler_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     amount: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
@@ -53,9 +62,7 @@ class Payment(Base):
         index=True,
     )
 
-    # ========================================================================
     # RECEIPT / PAYMENT PROOF
-    # ========================================================================
 
     receipt_data: Mapped[bytes | None] = mapped_column(
         LargeBinary,
@@ -88,9 +95,7 @@ class Payment(Base):
         nullable=True,
     )
 
-    # ========================================================================
     # PAYMENT CONFIRMATION
-    # ========================================================================
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -108,23 +113,30 @@ class Payment(Base):
         nullable=True,
     )
 
-    # ========================================================================
     # RELATIONSHIPS
-    # ========================================================================
 
     user: Mapped["User"] = relationship(
         back_populates="payments",
         foreign_keys=[user_id],
     )
 
+    handler: Mapped["User | None"] = relationship(
+        foreign_keys=[handler_id],
+    )
+
     confirmer: Mapped["User | None"] = relationship(
         foreign_keys=[confirmed_by],
+    )
+
+    allocations: Mapped[list["PaymentAllocation"]] = relationship(
+        back_populates="payment",
     )
 
     def __repr__(self) -> str:  # pragma: no cover
         return (
             f"<Payment id={self.id} "
             f"user_id={self.user_id} "
+            f"handler_id={self.handler_id} "
             f"amount={self.amount} "
             f"status={self.status}>"
         )
