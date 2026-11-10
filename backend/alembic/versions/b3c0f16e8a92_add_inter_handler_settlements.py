@@ -39,8 +39,8 @@ def upgrade() -> None:
         missing = expected - existing
         if missing:
             raise RuntimeError(
-                "Existing inter_handler_settlements table is missing "
-                "required columns: " + ", ".join(sorted(missing))
+                f"Existing {TABLE_NAME} table is missing required columns: "
+                f"{', '.join(sorted(missing))}"
             )
         return
 
