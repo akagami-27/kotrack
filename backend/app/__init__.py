@@ -6,6 +6,7 @@ on Base.metadata before Alembic runs migrations.
 
 from app.models import (
     drink_session,
+    inter_handler_settlement,
     password_reset,
     payment,
     payment_allocation,
@@ -17,6 +18,7 @@ from app.models import (
 
 __all__ = [
     "drink_session",
+    "inter_handler_settlement",
     "password_reset",
     "payment",
     "payment_allocation",

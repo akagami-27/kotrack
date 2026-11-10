@@ -17,6 +17,13 @@ type Balance = {
   total_owed: string | number
   total_confirmed_payments: string | number
   balance: string | number
+  outstanding_by_admin: AdminOutstanding[]
+}
+
+type AdminOutstanding = {
+  admin_id: number | null
+  admin_name: string
+  outstanding: string | number
 }
 
 type SessionHandler = {
@@ -32,6 +39,7 @@ type PaymentStatus =
 type Payment = {
   id: number
   user_id: number
+  handler_id: number | null
   amount: string | number
   status: PaymentStatus
   created_at: string
@@ -216,12 +224,28 @@ export default function Payments() {
       return
     }
 
+    const selectedOutstanding = payableAdmins.find(
+      (admin) => String(admin.admin_id) === handlerId,
+    )
+
+    if (!selectedOutstanding) {
+      setError('Select an Admin with an outstanding assigned-session balance.')
+      return
+    }
+
     if (
       !Number.isFinite(paymentAmount) ||
       paymentAmount <= 0
     ) {
       setError(
         'Payment amount must be greater than RM 0.',
+      )
+      return
+    }
+
+    if (paymentAmount > Number(selectedOutstanding.outstanding)) {
+      setError(
+        `Payment amount cannot exceed ${selectedOutstanding.admin_name}'s outstanding balance.`,
       )
       return
     }
@@ -308,8 +332,20 @@ export default function Payments() {
     balance?.balance ?? 0,
   )
 
-  const totalOwed = Number(
-    balance?.total_owed ?? 0,
+  const outstandingAdmins =
+    balance?.outstanding_by_admin ?? []
+
+  const payableAdmins = outstandingAdmins.filter(
+    (admin) =>
+      admin.admin_id !== null &&
+      Number(admin.outstanding) > 0 &&
+      sessionHandlers.some(
+        (handler) => handler.id === admin.admin_id,
+      ),
+  )
+
+  const selectedAdmin = payableAdmins.find(
+    (admin) => String(admin.admin_id) === handlerId,
   )
 
   const displayName =
@@ -446,10 +482,9 @@ export default function Payments() {
                 }
               />
 
-              <SummaryCard
-                label="Total owed"
-                value={`RM ${totalOwed.toFixed(2)}`}
-                description="From drink sessions"
+              <OutstandingSummaryCard
+                total={currentBalance}
+                admins={outstandingAdmins}
               />
 
               <SummaryCard
@@ -496,8 +531,8 @@ export default function Payments() {
                   </h2>
 
                   <p className="mt-1 text-[9px] leading-4 text-white/30 sm:text-[10px] sm:leading-5">
-                    Enter the amount and upload your
-                    receipt.
+                    Choose the Admin who owns the sessions you are paying,
+                    then upload your receipt.
                   </p>
                 </div>
 
@@ -529,20 +564,30 @@ export default function Payments() {
                       }
                       disabled={
                         submitting ||
-                        sessionHandlers.length === 0
+                        payableAdmins.length === 0
                       }
                       className="min-h-10 w-full rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2 text-xs text-white outline-none transition focus:border-white/20 disabled:opacity-50 sm:text-sm [&>option]:bg-[#0b0d15] [&>option]:text-white"
                     >
                       <option value="">Select an Admin</option>
-                      {sessionHandlers.map((handler) => (
+                      {payableAdmins.map((admin) => (
                         <option
-                          key={handler.id}
-                          value={handler.id}
+                          key={admin.admin_id}
+                          value={admin.admin_id ?? ''}
                         >
-                          {handler.name}
+                          {admin.admin_name} — RM {Number(admin.outstanding).toFixed(2)} outstanding
                         </option>
                       ))}
                     </select>
+                    {selectedAdmin ? (
+                      <p className="mt-1.5 text-[9px] text-cyan-200/70">
+                        Outstanding with {selectedAdmin.admin_name}:{' '}
+                        RM {Number(selectedAdmin.outstanding).toFixed(2)}
+                      </p>
+                    ) : payableAdmins.length === 0 && currentBalance > 0 ? (
+                      <p className="mt-1.5 text-[9px] text-amber-300/70">
+                        Your remaining balance is assigned to an unavailable or unassigned handler. Please contact an administrator.
+                      </p>
+                    ) : null}
                   </div>
 
                   {/* AMOUNT */}
@@ -562,6 +607,7 @@ export default function Payments() {
                         type="number"
                         min="0.01"
                         step="0.01"
+                        max={selectedAdmin ? Number(selectedAdmin.outstanding).toFixed(2) : undefined}
                         value={amount}
                         onChange={(event) =>
                           setAmount(
@@ -696,7 +742,8 @@ export default function Payments() {
                     submitting ||
                     !amount ||
                     !receipt ||
-                    !handlerId
+                    !handlerId ||
+                    !selectedAdmin
                   }
                   className="mt-3 min-h-10 w-full rounded-xl bg-white px-4 py-2.5 text-xs font-semibold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto sm:px-5 sm:text-sm"
                 >
@@ -758,6 +805,11 @@ export default function Payments() {
                     <PaymentCard
                       key={payment.id}
                       payment={payment}
+                      handlerName={
+                        sessionHandlers.find(
+                          (handler) => handler.id === payment.handler_id,
+                        )?.name
+                      }
                     />
                   ))}
                 </div>
@@ -781,7 +833,7 @@ export default function Payments() {
                     New payments start as pending.
                     Only an administrator can confirm
                     or reject them. Confirmed payments
-                    are included in your balance.
+                    reduce outstanding only after allocation to your sessions.
                   </p>
                 </div>
               </div>
@@ -839,14 +891,54 @@ function SummaryCard({
   )
 }
 
+function OutstandingSummaryCard({
+  total,
+  admins,
+}: {
+  total: number
+  admins: AdminOutstanding[]
+}) {
+  return (
+    <section className="flex min-h-[118px] flex-col rounded-xl border border-violet-300/30 bg-violet-400/[0.045] p-3 sm:min-h-[132px] sm:rounded-2xl sm:p-4">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[9px] uppercase tracking-wider text-violet-200/75">
+          Your outstanding
+        </p>
+        {total > 0 && (
+          <span className="rounded-full bg-red-400/10 px-2 py-0.5 text-[8px] font-semibold text-red-300">
+            To Pay
+          </span>
+        )}
+      </div>
+      <p className="mt-2 text-xl font-semibold tracking-tight tabular-nums sm:text-2xl">
+        RM {total.toFixed(2)}
+      </p>
+      {admins.length ? (
+        <div className="mt-2 max-h-14 space-y-1 overflow-y-auto pr-1" aria-label="Outstanding by admin">
+          {admins.map((admin) => (
+            <div key={admin.admin_id ?? 'unassigned'} className="flex items-center justify-between gap-2 rounded-lg border border-violet-200/[0.08] bg-violet-300/[0.035] px-2 py-1">
+              <span className="truncate text-[10px] text-white/70">{admin.admin_name}</span>
+              <span className="shrink-0 text-[10px] font-semibold tabular-nums">RM {Number(admin.outstanding).toFixed(2)}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-1 text-[10px] text-white/40">No outstanding balance</p>
+      )}
+    </section>
+  )
+}
+
 /* ================================================================
    PAYMENT CARD
    ================================================================ */
 
 function PaymentCard({
   payment,
+  handlerName,
 }: {
   payment: Payment
+  handlerName?: string
 }) {
   const createdDate = new Date(
     payment.created_at,
@@ -898,6 +990,12 @@ function PaymentCard({
           RM {Number(payment.amount).toFixed(2)}
         </p>
       </div>
+
+      {payment.handler_id !== null && (
+        <p className="mt-1.5 truncate text-[8px] text-white/35 sm:text-[9px]">
+          Recipient: {handlerName ?? `Admin #${payment.handler_id}`}
+        </p>
+      )}
 
       {/* RECEIPT */}
 

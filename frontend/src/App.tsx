@@ -102,16 +102,7 @@ function App() {
       {/* Login */}
       <Route
         path="/login"
-        element={
-          user ? (
-            <Navigate
-              to="/dashboard"
-              replace
-            />
-          ) : (
-            <Login />
-          )
-        }
+        element={<Login />}
       />
 
       {/* Registration */}

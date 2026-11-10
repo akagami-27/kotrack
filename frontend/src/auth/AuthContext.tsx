@@ -102,6 +102,7 @@ export function AuthProvider({
   async function login(
     name: string,
     password: string,
+    onCredentialsVerified?: () => void,
   ) {
     const cleanName = name.trim()
 
@@ -126,6 +127,10 @@ export function AuthProvider({
         },
       )
 
+    // The backend has verified the password. Let the login UI show its
+    // verification stage while the authenticated profile is initialized.
+    onCredentialsVerified?.()
+
     // Step 2: store token immediately
     localStorage.setItem(
       TOKEN_KEY,
@@ -135,8 +140,9 @@ export function AuthProvider({
     setToken(response.access_token)
 
     // Step 3: retrieve the authenticated user
-    const currentUser =
-      await apiRequest<User>(
+    let currentUser: User
+    try {
+      currentUser = await apiRequest<User>(
         '/api/users/me',
         {
           headers: {
@@ -145,8 +151,16 @@ export function AuthProvider({
           },
         },
       )
+    } catch (error) {
+      localStorage.removeItem(TOKEN_KEY)
+      setToken(null)
+      setUser(null)
+      throw error
+    }
 
     setUser(currentUser)
+
+    return currentUser
   }
 
   function updateUser(

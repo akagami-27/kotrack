@@ -74,6 +74,10 @@ type SessionFinancialBucket = {
   total_session_value: number | string
   total_collected?: number | string
   total_outstanding?: number | string
+  session_outstanding?: number | string
+  inter_handler_receivable?: number | string
+  total_handler_collected?: number | string
+  unallocated_collection?: number | string
 }
 
 type AdminFinancialBucket = SessionFinancialBucket & {
@@ -89,7 +93,8 @@ type FinancialBreakdown = {
   other_admins?: AdminFinancialBucket[]
   unassigned_sessions?: SessionFinancialBucket
   system_wide?: SessionFinancialBucket & {
-    total_collected: number | string
+    total_session_collected: number | string
+    total_outstanding: number | string
   }
 }
 
@@ -476,7 +481,23 @@ export default function AdminDashboard() {
     ) => {
       const sessionValue = Number(bucket?.total_session_value ?? 0)
       const collected = Number(bucket?.total_collected ?? 0)
-      const outstanding = Number(bucket?.total_outstanding ?? 0)
+      const sessionOutstanding = Number(
+        bucket?.session_outstanding ?? bucket?.total_outstanding ?? 0,
+      )
+      const interHandlerReceivable = Number(
+        bucket?.inter_handler_receivable ?? 0,
+      )
+      const totalOutstanding = Number(
+        bucket?.total_outstanding ?? sessionOutstanding + interHandlerReceivable,
+      )
+
+      const handlerCollected = Number(
+        bucket?.total_handler_collected ?? collected,
+      )
+
+      const unallocatedCollection = Number(
+        bucket?.unallocated_collection ?? 0,
+      )
 
       const collectionRate =
         sessionValue > 0
@@ -520,21 +541,46 @@ export default function AdminDashboard() {
             <>
               <div className="my-3 border-t border-white/[0.06]" />
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
+              <div>
+                <p className="text-[9px] text-white/35">Session Outstanding</p>
+                <p className="mt-1 text-sm font-semibold text-red-300">
+                  {formatRM(sessionOutstanding)}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-[9px] text-white/35">Inter-Handler Receivable</p>
+                <p className="mt-1 text-sm font-semibold text-amber-300">
+                  {formatRM(interHandlerReceivable)}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-[9px] text-white/35">Total Outstanding</p>
+                <p className="mt-1 text-sm font-semibold text-red-200">
+                  {formatRM(totalOutstanding)}
+                </p>
+              </div>
+            </div>
+
+            {bucket?.total_handler_collected !== undefined && (
+              <div className="mt-3 grid grid-cols-2 gap-2 border-t border-white/[0.06] pt-3">
                 <div>
-                  <p className="text-[9px] text-white/35">Collected</p>
-                  <p className="mt-1 text-sm font-semibold text-emerald-300">
-                    {formatRM(collected)}
+                  <p className="text-[9px] text-white/35">Handler Collected</p>
+                  <p className="mt-1 text-sm font-semibold text-cyan-200">
+                    {formatRM(handlerCollected)}
                   </p>
                 </div>
 
                 <div>
-                  <p className="text-[9px] text-white/35">Outstanding</p>
-                  <p className="mt-1 text-sm font-semibold text-red-300">
-                    {formatRM(outstanding)}
+                  <p className="text-[9px] text-white/35">Unallocated Collection</p>
+                  <p className="mt-1 text-sm font-semibold text-amber-300">
+                    {formatRM(unallocatedCollection)}
                   </p>
                 </div>
               </div>
+            )}
 
               <div className="mt-3">
                 <div className="flex items-center justify-between">
@@ -579,7 +625,7 @@ export default function AdminDashboard() {
     Number(
       isSuperAdmin
         ? analytics?.summary.total_confirmed_payments
-        : adminFinancialScope?.total_collected,
+        : adminFinancialScope?.total_handler_collected,
     ) || 0,
     0,
   )
@@ -587,15 +633,24 @@ export default function AdminDashboard() {
   const safeOutstanding = Math.max(
     Number(
       isSuperAdmin
-        ? analytics?.summary.total_outstanding
+        ? financialBreakdown?.system_wide?.total_outstanding ?? analytics?.summary.total_outstanding
         : adminFinancialScope?.total_outstanding,
+    ) || 0,
+    0,
+  )
+
+  const sessionAllocated = Math.max(
+    Number(
+      isSuperAdmin
+        ? financialBreakdown?.system_wide?.total_session_collected ?? analytics?.summary.total_confirmed_payments
+        : adminFinancialScope?.total_collected,
     ) || 0,
     0,
   )
 
   const collectionRate =
     totalSessionValue > 0
-      ? Math.min((totalConfirmedPayments / totalSessionValue) * 100, 100)
+      ? Math.min((sessionAllocated / totalSessionValue) * 100, 100)
       : 0
 
   return (
@@ -1033,6 +1088,30 @@ export default function AdminDashboard() {
                         </p>
                       </div>
                     </div>
+
+                    <div className="mt-3 grid grid-cols-3 gap-2 border-t border-white/[0.06] pt-3">
+                      <div>
+                        <p className="text-[9px] text-white/35">Session Outstanding</p>
+                        <p className="mt-1 text-sm font-semibold text-red-300">
+                          {formatRM(Number(financialBreakdown.system_wide?.session_outstanding ?? 0))}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[9px] text-white/35">Inter-Handler Receivable</p>
+                        <p className="mt-1 text-sm font-semibold text-amber-300">
+                          {formatRM(Number(financialBreakdown.system_wide?.inter_handler_receivable ?? 0))}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[9px] text-white/35">System-Wide Outstanding</p>
+                        <p className="mt-1 text-sm font-semibold text-red-200">
+                          {formatRM(Number(financialBreakdown.system_wide?.total_outstanding ?? 0))}
+                        </p>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-[9px] text-white/30">
+                      Session allocations: {formatRM(Number(financialBreakdown.system_wide?.total_session_collected ?? 0))}
+                    </p>
                   </div>
                 </>
               )}
