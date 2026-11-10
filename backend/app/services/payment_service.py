@@ -13,7 +13,7 @@ the transaction and is responsible for committing or rolling back.
 """
 
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from app.models.enums import PaymentStatus, UserRole, is_admin_role
 from app.models.payment import Payment
 from app.models.user import User
-from app.services.balance import calculate_user_balance
+from app.services.balance import user_outstanding_by_handler
 from app.services.fifo_allocation_service import allocate_payment_fifo
 
 
@@ -41,6 +41,16 @@ def create_payment(
     if not amount.is_finite() or amount <= 0:
         raise ValueError("Payment amount must be greater than zero")
 
+    try:
+        rounded_amount = amount.quantize(Decimal("0.01"))
+    except InvalidOperation as exc:
+        raise ValueError("Payment amount must have at most 2 decimal places") from exc
+
+    if rounded_amount != amount:
+        raise ValueError("Payment amount must have at most 2 decimal places")
+
+    amount = rounded_amount
+
     user = db.get(User, user_id)
 
     if user is None:
@@ -51,15 +61,30 @@ def create_payment(
 
     handler = _get_active_admin(db, handler_id)
 
-    current_balance = calculate_user_balance(db, user_id)
+    outstanding = user_outstanding_by_handler(db, user_id)
+    current_balance = outstanding["total_outstanding"]
 
     if current_balance <= 0:
         raise ValueError("User has no outstanding balance")
 
-    if amount > current_balance:
+    handler_outstanding = next(
+        (
+            item["outstanding"]
+            for item in outstanding["admins"]
+            if item["admin_id"] == handler.id
+        ),
+        Decimal("0.00"),
+    )
+
+    if handler_outstanding <= 0:
         raise ValueError(
-            f"Payment amount cannot exceed outstanding balance "
-            f"of RM{current_balance:.2f}"
+            "Selected Admin has no outstanding assigned-session balance"
+        )
+
+    if amount > handler_outstanding:
+        raise ValueError(
+            f"Payment amount cannot exceed the selected Admin's "
+            f"outstanding balance of RM{handler_outstanding:.2f}"
         )
 
     payment = Payment(

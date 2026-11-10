@@ -13,7 +13,7 @@ type AuthContextType = {
   user: User | null
   token: string | null
   loading: boolean
-  login: (name: string, password: string) => Promise<void>
+  login: (name: string, password: string, onCredentialsVerified?: () => void) => Promise<User>
   logout: () => void
   updateUser: (user: User) => void
 }

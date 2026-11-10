@@ -16,6 +16,7 @@ from app.models.session_request_participant import SessionRequestParticipant
 from app.models.password_reset import PasswordResetRequest
 from app.models.payment_reconciliation import PaymentReconciliation
 from app.models.payment_allocation import PaymentAllocation
+from app.models.inter_handler_settlement import InterHandlerSettlement
 
 __all__ = [
     "Base",
@@ -30,4 +31,5 @@ __all__ = [
     "SessionRequestParticipant",
     "PaymentReconciliation",
     "PaymentAllocation",
+    "InterHandlerSettlement",
 ]

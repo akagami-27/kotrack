@@ -14,11 +14,18 @@ type UserProfile = {
   avatar_data: string | null
 }
 
+type AdminOutstanding = {
+  admin_id: number | null
+  admin_name: string
+  outstanding: string | number
+}
+
 type Balance = {
   user_id: number
   total_owed: string | number
   total_confirmed_payments: string | number
   balance: string | number
+  outstanding_by_admin: AdminOutstanding[]
 }
 
 type SessionParticipant = {
@@ -163,8 +170,7 @@ export default function Dashboard() {
   const currentBalance =
     Number(balance?.balance ?? 0)
 
-  const totalOwed =
-    Number(balance?.total_owed ?? 0)
+  const outstandingAdmins = balance?.outstanding_by_admin ?? []
 
   const totalConfirmedPayments =
     Number(
@@ -405,11 +411,33 @@ export default function Dashboard() {
                 }
               />
 
-              <StatCard
-                label="Total owed"
-                value={`RM ${totalOwed.toFixed(2)}`}
-                description="Total session amounts owed"
-              />
+              <section className="flex min-h-[118px] flex-col rounded-2xl border border-violet-300/30 bg-violet-400/[0.045] p-3 sm:min-h-[132px] sm:p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[9px] uppercase tracking-wider text-violet-200/75">
+                    Your outstanding
+                  </p>
+                  {currentBalance > 0 && (
+                    <span className="rounded-full bg-red-400/10 px-2 py-0.5 text-[8px] font-semibold text-red-300">
+                      To Pay
+                    </span>
+                  )}
+                </div>
+                <p className="mt-2 text-xl font-semibold tracking-tight sm:text-2xl">
+                  RM {currentBalance.toFixed(2)}
+                </p>
+                {outstandingAdmins.length ? (
+                  <div className="mt-2 max-h-14 space-y-1 overflow-y-auto pr-1" aria-label="Outstanding by admin">
+                    {outstandingAdmins.map((admin) => (
+                      <div key={admin.admin_id} className="flex items-center justify-between gap-2 rounded-lg border border-violet-200/[0.08] bg-violet-300/[0.035] px-2 py-1">
+                        <span className="truncate text-[10px] text-white/70">{admin.admin_name}</span>
+                        <span className="shrink-0 text-[10px] font-semibold tabular-nums">RM {Number(admin.outstanding).toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-1 text-[10px] text-white/40">No outstanding balance</p>
+                )}
+              </section>
 
               <StatCard
                 label="Confirmed payments"

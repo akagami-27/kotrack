@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useLocation } from 'react-router-dom'
 
 import { useAuth } from '../auth/useAuth'
 import { isSuperAdminRole } from '../auth/roles'
@@ -10,6 +10,7 @@ export default function SuperAdminRoute({
   children: ReactNode
 }) {
   const { user, loading } = useAuth()
+  const location = useLocation()
 
   if (loading) {
     return (
@@ -23,7 +24,7 @@ export default function SuperAdminRoute({
     )
   }
 
-  if (!user) return <Navigate to="/login" replace />
+  if (!user) return <Navigate to="/login" replace state={{ from: location }} />
   if (!isSuperAdminRole(user.role)) {
     return <Navigate to="/admin" replace />
   }

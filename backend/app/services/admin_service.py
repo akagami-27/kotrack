@@ -8,17 +8,19 @@ All financial values are calculated from the source records:
     SessionParticipant.amount_owed
     Payment.amount where status == CONFIRMED
     PaymentAllocation.amount where payment status == CONFIRMED
+    InterHandlerSettlement.amount where status == PENDING
 
 No balance is stored directly on the User model.
 """
 
 from decimal import Decimal
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.drink_session import DrinkSession
 from app.models.enums import PaymentStatus, UserRole
+from app.models.inter_handler_settlement import InterHandlerSettlement
 from app.models.payment import Payment
 from app.models.payment_allocation import PaymentAllocation
 from app.models.session_participant import SessionParticipant
@@ -217,8 +219,9 @@ def get_session_financial_breakdown(
     Only confirmed payment allocations count as collected.
     Unallocated payment amounts are deliberately excluded.
 
-    Outstanding is calculated from participant debts minus confirmed
-    allocations belonging to participants in the relevant sessions.
+    Session outstanding is calculated from participant debts minus confirmed
+    allocations belonging to participants in the relevant sessions. Pending
+    inter-handler receivables are attributed separately to their payees.
     """
 
     def aggregate_sessions(*conditions) -> dict:
@@ -296,10 +299,64 @@ def get_session_financial_breakdown(
             ),
         }
 
+    def pending_receivable(handler_id: int | None) -> Decimal:
+        if handler_id is None:
+            return ZERO
+
+        amount = db.scalar(
+            select(
+                func.coalesce(
+                    func.sum(InterHandlerSettlement.amount),
+                    ZERO,
+                )
+            ).where(
+                InterHandlerSettlement.payee_handler_id == handler_id,
+                cast(InterHandlerSettlement.status, String) == "PENDING",
+            )
+        ) or ZERO
+        return Decimal(amount)
+
+    def add_settlement_outstanding(
+        bucket: dict,
+        handler_id: int | None,
+    ) -> dict:
+        session_outstanding = Decimal(bucket["total_outstanding"])
+        receivable = pending_receivable(handler_id)
+        bucket["session_outstanding"] = session_outstanding
+        bucket["inter_handler_receivable"] = receivable
+        bucket["total_outstanding"] = session_outstanding + receivable
+        return bucket
+
     # Super Admin's own assigned sessions.
     my_sessions = aggregate_sessions(
         DrinkSession.handler_id == super_admin_id,
     )
+
+    # Total confirmed payments collected by this handler.
+    # This includes confirmed payments not yet allocated to a session.
+    total_handler_collected = db.scalar(
+        select(
+            func.coalesce(
+                func.sum(Payment.amount),
+                ZERO,
+            )
+        ).where(
+            Payment.status == PaymentStatus.CONFIRMED,
+            Payment.handler_id == super_admin_id,
+        )
+    ) or ZERO
+
+    total_handler_collected = Decimal(total_handler_collected)
+
+    my_sessions["total_handler_collected"] = total_handler_collected
+
+    # Collection received but not allocated to any session.
+    my_sessions["unallocated_collection"] = max(
+        total_handler_collected - my_sessions["total_collected"],
+        ZERO,
+    )
+
+    add_settlement_outstanding(my_sessions, super_admin_id)
 
     # Retrieve all regular Admin accounts.
     regular_admins = db.execute(
@@ -316,8 +373,11 @@ def get_session_financial_breakdown(
         {
             "handler_id": admin.id,
             "handler_name": admin.name,
-            **aggregate_sessions(
-                DrinkSession.handler_id == admin.id,
+            **add_settlement_outstanding(
+                aggregate_sessions(
+                    DrinkSession.handler_id == admin.id,
+                ),
+                admin.id,
             ),
         }
         for admin in regular_admins
@@ -344,12 +404,30 @@ def get_session_financial_breakdown(
     unassigned_sessions.pop("total_collected")
     unassigned_sessions.pop("total_outstanding")
 
-    # System-wide session statistics only.
-    # Deliberately does not expose combined collected or outstanding.
+    # System-wide session statistics and the one-sided receivable total.
     system_wide = aggregate_sessions()
-
-    system_wide.pop("total_collected")
-    system_wide.pop("total_outstanding")
+    system_session_collected = Decimal(system_wide.pop("total_collected"))
+    system_session_outstanding = Decimal(system_wide.pop("total_outstanding"))
+    system_inter_handler_receivable = db.scalar(
+        select(
+            func.coalesce(
+                func.sum(InterHandlerSettlement.amount),
+                ZERO,
+            )
+        ).where(cast(InterHandlerSettlement.status, String) == "PENDING")
+    ) or ZERO
+    system_inter_handler_receivable = Decimal(
+        system_inter_handler_receivable
+    )
+    system_wide.update({
+        "total_session_collected": system_session_collected,
+        "session_outstanding": system_session_outstanding,
+        "inter_handler_receivable": system_inter_handler_receivable,
+        "total_outstanding": (
+            system_session_outstanding
+            + system_inter_handler_receivable
+        ),
+    })
 
     return {
         "my_assigned_sessions": my_sessions,
@@ -595,6 +673,9 @@ def get_admin_analytics(
             db,
             super_admin_id=current_user.id,
         )
+        response["summary"]["total_outstanding"] = breakdown[
+            "my_assigned_sessions"
+        ]["total_outstanding"]
 
         # Regular Admins receive only their own assigned-session figures.
         response["financial_breakdown"] = {
@@ -605,11 +686,13 @@ def get_admin_analytics(
         current_user is not None
         and current_user.role == UserRole.SUPER_ADMIN
     ):
-        response["financial_breakdown"] = (
-            get_session_financial_breakdown(
-                db,
-                super_admin_id=current_user.id,
-            )
+        breakdown = get_session_financial_breakdown(
+            db,
+            super_admin_id=current_user.id,
         )
+        response["summary"]["total_outstanding"] = breakdown[
+            "system_wide"
+        ]["total_outstanding"]
+        response["financial_breakdown"] = breakdown
 
     return response
