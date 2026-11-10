@@ -310,9 +310,71 @@ jobs:
                     command: ["/bin/sh", "-ec"]
                     args:
                       - |
-                        python -c 'from sqlalchemy import text; from app.db.session import engine; u=engine.url; assert u.host == "postgresql.database.svc.cluster.local" and u.database == "og", "Unexpected database target"; c=engine.connect(); r=c.execute(text("select version_num from alembic_version")).scalar_one(); assert r in {"d3896ea15b0f","a2190d9f7c31","c840a2b9d13f","d172a0f61c42"}, "Unexpected migration revision"; print("Verified:",u.host,u.database,r); c.close()'
-                        python -m alembic upgrade head
+                        python - <<'PY'
+                        import sys
+
+                        from alembic.config import Config
+                        from alembic.runtime.migration import MigrationContext
+                        from alembic.script import ScriptDirectory
+                        from app.db.session import engine
+
+                        url = engine.url
+                        if url.host != "postgresql.database.svc.cluster.local" or url.database != "og":
+                            sys.exit(f"Unexpected database target: {url.host}/{url.database}")
+
+                        script = ScriptDirectory.from_config(Config("alembic.ini"))
+                        migration_heads = tuple(script.get_heads())
+                        if not migration_heads:
+                            sys.exit("Alembic migration graph has no heads")
+
+                        with engine.connect() as connection:
+                            current_heads = tuple(MigrationContext.configure(connection).get_current_heads())
+
+                        if not current_heads:
+                            sys.exit("Production database has no recorded Alembic revision")
+
+                        try:
+                            for revision in current_heads:
+                                if script.get_revision(revision) is None:
+                                    sys.exit(f"Unknown Alembic revision: {revision}")
+                            list(script.iterate_revisions(migration_heads, current_heads))
+                        except Exception as exc:
+                            sys.exit(f"Unsupported Alembic migration state {current_heads}: {exc}")
+
+                        print(
+                            "Verified production target and migration path:",
+                            url.host,
+                            url.database,
+                            "current=", current_heads,
+                            "heads=", migration_heads,
+                        )
+                        PY
+
+                        head_count="$(python -c 'from alembic.config import Config; from alembic.script import ScriptDirectory; print(len(ScriptDirectory.from_config(Config("alembic.ini")).get_heads()))')"
+                        if [ "$head_count" -eq 1 ]; then
+                          python -m alembic upgrade head
+                        else
+                          python -m alembic upgrade heads
+                        fi
                         python -m alembic current
+                        python - <<'PY'
+                        import sys
+
+                        from alembic.config import Config
+                        from alembic.runtime.migration import MigrationContext
+                        from alembic.script import ScriptDirectory
+                        from app.db.session import engine
+
+                        script_heads = set(ScriptDirectory.from_config(Config("alembic.ini")).get_heads())
+                        with engine.connect() as connection:
+                            current_heads = set(MigrationContext.configure(connection).get_current_heads())
+                        if current_heads != script_heads:
+                            sys.exit(
+                                f"Alembic upgrade did not reach all code heads: "
+                                f"current={sorted(current_heads)} expected={sorted(script_heads)}"
+                            )
+                        print("Verified upgraded Alembic state:", sorted(current_heads))
+                        PY
                     env:
                       - name: DATABASE_URL
                         valueFrom:
@@ -340,7 +402,10 @@ jobs:
     name: Deploy to Kubernetes
     runs-on: ubuntu-latest
     needs: [publish-images, migrate-production, production-preflight]
-    if: needs.production-preflight.result == 'success'
+    if: >-
+      needs.production-preflight.result == 'success' &&
+      needs.publish-images.result == 'success' &&
+      needs.migrate-production.result == 'success'
     environment: production
 
     steps:

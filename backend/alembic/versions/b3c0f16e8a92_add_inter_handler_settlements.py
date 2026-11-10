@@ -1,22 +1,18 @@
-"""add inter-handler settlement ledger when absent
+"""Add inter-handler settlements when the table is not already present.
 
 Revision ID: b3c0f16e8a92
 Revises: 8e11a481d063
-Create Date: 2026-11-10
 """
 
-from typing import Sequence, Union
-
-import sqlalchemy as sa
 from alembic import op
+import sqlalchemy as sa
 from sqlalchemy import inspect
 
 
-revision: str = "b3c0f16e8a92"
-down_revision: Union[str, Sequence[str], None] = "8e11a481d063"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
-
+revision = "b3c0f16e8a92"
+down_revision = "8e11a481d063"
+branch_labels = None
+depends_on = None
 
 TABLE_NAME = "inter_handler_settlements"
 
@@ -43,8 +39,8 @@ def upgrade() -> None:
         missing = expected - existing
         if missing:
             raise RuntimeError(
-                "Existing inter_handler_settlements table is missing "
-                f"required columns: {', '.join(sorted(missing))}"
+                f"Existing {TABLE_NAME} table is missing required columns: "
+                f"{', '.join(sorted(missing))}"
             )
         return
 
@@ -79,7 +75,6 @@ def upgrade() -> None:
         sa.Column("paid_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("notes", sa.Text(), nullable=True),
     )
-
     op.create_index(
         "ix_inter_handler_settlements_payer_handler_id",
         TABLE_NAME,
@@ -98,6 +93,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # The table may predate this migration and contain committed settlements.
-    # Keep it during downgrade rather than risk dropping existing accounting data.
+    # This migration may adopt a table that already contains production data.
+    # It intentionally has no downgrade to avoid dropping that data.
     pass
