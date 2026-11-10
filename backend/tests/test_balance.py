@@ -5,7 +5,7 @@ Integration tests covering:
   - Multiple sessions per user
   - Partial payments
   - Pending / confirmed / rejected payment handling
-  - Balance calculation (owed - CONFIRMED payments only)
+  - Balance calculation (owed - confirmed allocations only)
 
 These require a real Postgres database (see tests/conftest.py).
 """
@@ -14,6 +14,8 @@ from decimal import Decimal
 
 from app.models.enums import PaymentStatus, UserRole
 from app.models.payment import Payment
+from app.models.payment_allocation import PaymentAllocation
+from app.models.session_participant import SessionParticipant
 from app.models.user import User
 from app.services.balance import calculate_user_balance
 from app.services.session_service import create_drink_session
@@ -74,7 +76,7 @@ def test_pending_payment_does_not_reduce_balance(db):
     creator = make_user(db, "Alice")
     bob = make_user(db, "Bob")
 
-    create_drink_session(
+    session = create_drink_session(
         db,
         session_date=date(2026, 1, 1),
         packets_used=Decimal("2"),
@@ -83,6 +85,8 @@ def test_pending_payment_does_not_reduce_balance(db):
         commit=False,
     )
     db.flush()
+
+    participant = next(p for p in session.participants if p.user_id == bob.id)
 
     balance_before = calculate_user_balance(db, bob.id)
 
@@ -98,7 +102,7 @@ def test_rejected_payment_does_not_reduce_balance(db):
     creator = make_user(db, "Alice")
     bob = make_user(db, "Bob")
 
-    create_drink_session(
+    session = create_drink_session(
         db,
         session_date=date(2026, 1, 1),
         packets_used=Decimal("2"),
@@ -107,6 +111,7 @@ def test_rejected_payment_does_not_reduce_balance(db):
         commit=False,
     )
     db.flush()
+    participant = next(p for p in session.participants if p.user_id == bob.id)
 
     balance_before = calculate_user_balance(db, bob.id)
 
@@ -127,7 +132,7 @@ def test_confirmed_partial_payment_reduces_balance_correctly(db):
     bob = make_user(db, "Bob")
 
     # 20.00 owed to a single participant: 1 packet x RM20/packet, 1 person.
-    create_drink_session(
+    session = create_drink_session(
         db,
         session_date=date(2026, 1, 1),
         packets_used=Decimal("1"),
@@ -137,6 +142,7 @@ def test_confirmed_partial_payment_reduces_balance_correctly(db):
         commit=False,
     )
     db.flush()
+    participant = next(p for p in session.participants if p.user_id == bob.id)
 
     assert calculate_user_balance(db, bob.id) == Decimal("20.00")
 
@@ -151,6 +157,14 @@ def test_confirmed_partial_payment_reduces_balance_correctly(db):
     payment.status = PaymentStatus.CONFIRMED
     payment.confirmed_at = datetime.now(timezone.utc)
     payment.confirmed_by = creator.id
+    db.flush()
+
+    db.add(PaymentAllocation(
+        payment_id=payment.id,
+        session_participant_id=participant.id,
+        amount=Decimal("5.00"),
+        allocation_type="MANUAL",
+    ))
     db.flush()
 
     assert calculate_user_balance(db, bob.id) == Decimal("15.00")
@@ -177,7 +191,6 @@ def test_multiple_sessions_accumulate_balance(db):
         commit=False,
     )
     db.flush()
-
     # Session 1: 25.00 / 2 = 12.50 each. Session 2: 37.50 / 2 = 18.75 each.
     expected = Decimal("12.50") + Decimal("18.75")
     assert calculate_user_balance(db, bob.id) == expected
@@ -187,7 +200,7 @@ def test_multiple_confirmed_payments_sum_correctly(db):
     creator = make_user(db, "Alice")
     bob = make_user(db, "Bob")
 
-    create_drink_session(
+    session = create_drink_session(
         db,
         session_date=date(2026, 1, 1),
         packets_used=Decimal("2"),
@@ -197,12 +210,29 @@ def test_multiple_confirmed_payments_sum_correctly(db):
         commit=False,
     )
     db.flush()
+    participant = next(p for p in session.participants if p.user_id == bob.id)
     owed = calculate_user_balance(db, bob.id)  # 25.00
 
     p1 = Payment(user_id=bob.id, amount=Decimal("10.00"), status=PaymentStatus.CONFIRMED)
     p2 = Payment(user_id=bob.id, amount=Decimal("5.00"), status=PaymentStatus.CONFIRMED)
     p3 = Payment(user_id=bob.id, amount=Decimal("100.00"), status=PaymentStatus.PENDING)
     db.add_all([p1, p2, p3])
+    db.flush()
+
+    db.add_all([
+        PaymentAllocation(
+            payment_id=p1.id,
+            session_participant_id=participant.id,
+            amount=Decimal("10.00"),
+            allocation_type="MANUAL",
+        ),
+        PaymentAllocation(
+            payment_id=p2.id,
+            session_participant_id=participant.id,
+            amount=Decimal("5.00"),
+            allocation_type="MANUAL",
+        ),
+    ])
     db.flush()
 
     assert calculate_user_balance(db, bob.id) == owed - Decimal("15.00")
@@ -213,7 +243,7 @@ def test_balance_is_scoped_per_user(db):
     bob = make_user(db, "Bob")
     carol = make_user(db, "Carol")
 
-    create_drink_session(
+    session = create_drink_session(
         db,
         session_date=date(2026, 1, 1),
         packets_used=Decimal("1"),
@@ -223,8 +253,16 @@ def test_balance_is_scoped_per_user(db):
     )
     db.flush()
 
+    participant = next(p for p in session.participants if p.user_id == bob.id)
     payment = Payment(user_id=bob.id, amount=Decimal("12.50"), status=PaymentStatus.CONFIRMED)
     db.add(payment)
+    db.flush()
+    db.add(PaymentAllocation(
+        payment_id=payment.id,
+        session_participant_id=participant.id,
+        amount=Decimal("12.50"),
+        allocation_type="MANUAL",
+    ))
     db.flush()
 
     assert calculate_user_balance(db, bob.id) == Decimal("0.00")

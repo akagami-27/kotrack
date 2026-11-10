@@ -39,8 +39,20 @@ class PaymentRead(BaseModel):
     receipt_uploaded_at: datetime | None
 
 
+class AdminOutstandingRead(BaseModel):
+    admin_id: int | None
+    admin_name: str
+    outstanding: Decimal
+
+
 class UserBalanceRead(BaseModel):
     user_id: int
     total_owed: Decimal
     total_confirmed_payments: Decimal
     balance: Decimal
+    outstanding_by_admin: list[AdminOutstandingRead]
+
+
+class UserOutstandingBreakdownRead(BaseModel):
+    total_outstanding: Decimal
+    admins: list[AdminOutstandingRead]

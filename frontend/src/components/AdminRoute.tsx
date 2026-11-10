@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useLocation } from 'react-router-dom'
 
 import { useAuth } from '../auth/useAuth'
 import { isAdminRole } from '../auth/roles'
@@ -12,6 +12,7 @@ export default function AdminRoute({
   children,
 }: AdminRouteProps) {
   const { user, loading } = useAuth()
+  const location = useLocation()
 
   if (loading) {
     return (
@@ -28,6 +29,7 @@ export default function AdminRoute({
       <Navigate
         to="/login"
         replace
+        state={{ from: location }}
       />
     )
   }

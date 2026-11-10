@@ -105,10 +105,16 @@ async def submit_payment(
             detail="Invalid payment amount",
         )
 
-    if payment_amount <= 0:
+    if not payment_amount.is_finite() or payment_amount <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Payment amount must be greater than zero",
+        )
+
+    if payment_amount.as_tuple().exponent < -2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payment amount must have at most 2 decimal places",
         )
 
     # ------------------------------------------------------------------------

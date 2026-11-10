@@ -1165,13 +1165,13 @@ def test_5q_admin_can_view_unassigned_payment_detail(db: Session):
 
 
 # ---------------------------------------------------------------------------
-# 5r: balance.py functions are unchanged
+# 5r: overall balance follows confirmed allocations
 # ---------------------------------------------------------------------------
 
 
-def test_5r_overall_balance_unaffected_by_reconciliation(db: Session):
+def test_5r_overall_balance_decreases_when_payment_is_reconciled(db: Session):
     """
-    Reconciliation must not change the overall user balance.
+    The confirmed payment reduces outstanding only after its allocation is linked to the user session participant row.
     The overall balance only changes when a new CONFIRMED payment is added
     or when amount_owed changes — both of which are outside Step 5 scope.
     """
@@ -1201,11 +1201,12 @@ def test_5r_overall_balance_unaffected_by_reconciliation(db: Session):
     )
     db.commit()
 
-    # Balance after reconciliation must be identical.
+    # Reconciliation creates the allocation that reduces outstanding.
     balance_after = calculate_user_balance(db, user_a.id)
     total_paid_after = total_confirmed_payments(db, user_a.id)
 
-    assert balance_before == balance_after
+    assert balance_before == amount_owed
+    assert balance_after == Decimal("0.00")
     assert total_paid_before == total_paid_after
 
 
